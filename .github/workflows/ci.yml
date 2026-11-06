@@ -1,0 +1,13 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  conventions:
+    uses: Ruchoir/.github/.github/workflows/conventions.yml@v1

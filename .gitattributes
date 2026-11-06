@@ -1,0 +1,3 @@
+# Text files are stored with LF line endings, whatever the platform that commits them.
+* text=auto eol=lf
+*.sh text eol=lf

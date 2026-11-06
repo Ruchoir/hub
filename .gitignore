@@ -1,0 +1,16 @@
+# Local files that never reach the repository.
+/CLAUDE.md
+/.claude/
+
+# Secrets and environment.
+.env
+.env.*
+!.env.example
+
+# Dependencies and build output.
+node_modules/
+target/
+.next/
+out/
+dist/
+*.tsbuildinfo
