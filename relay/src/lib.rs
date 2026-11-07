@@ -23,6 +23,7 @@ use axum::extract::{DefaultBodyLimit, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::routing::{get, post};
 use axum::{Json, Router};
+use jwt_simple::claims::JWTClaims;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
@@ -167,6 +168,22 @@ async fn deliver(
             tracing::warn!(platform = %body.platform, ?kind, %reason, "push refused");
             answer(StatusCode::BAD_GATEWAY, "failed")
         }
+    }
+}
+
+/// A JWT's claims exactly as `custom` writes them, and nothing else: Apple and Google each ask for a
+/// fixed set (`iss` and `iat` for Apple), which jwt-simple's defaults (`exp`, `nbf`) would add to.
+pub(crate) fn exact_claims<T>(custom: T) -> JWTClaims<T> {
+    JWTClaims {
+        issued_at: None,
+        expires_at: None,
+        invalid_before: None,
+        issuer: None,
+        subject: None,
+        audiences: None,
+        jwt_id: None,
+        nonce: None,
+        custom,
     }
 }
 
