@@ -29,6 +29,9 @@ pub const VALKEY_POOL_SIZE: &str = "HUB_VALKEY_POOL_SIZE";
 /// Whether pending migrations are applied at start-up: `true` in development, `false` in production,
 /// where `hub migrate` applies them deliberately.
 pub const AUTO_MIGRATE: &str = "HUB_AUTO_MIGRATE";
+/// Propolis's issuer, whose access tokens the hub accepts. Unset: every authenticated call is
+/// refused.
+pub const ISSUER: &str = "HUB_ISSUER";
 
 const DEFAULT_LISTEN: &str = "127.0.0.1:8080";
 const DEFAULT_PUBLIC_URL: &str = "http://localhost:8080";
@@ -55,6 +58,8 @@ pub struct Config {
     pub valkey_pool_size: usize,
     /// Whether pending migrations are applied at start-up.
     pub auto_migrate: bool,
+    /// Propolis's issuer, when the hub accepts its tokens.
+    pub issuer: Option<String>,
 }
 
 impl Config {
@@ -108,6 +113,9 @@ impl Config {
                 Some("false") => false,
                 Some(_) => return Err(ConfigError::new(AUTO_MIGRATE, "true or false")),
             },
+            issuer: lookup(ISSUER)
+                .map(|v| v.trim().trim_end_matches('/').to_owned())
+                .filter(|v| !v.is_empty()),
         })
     }
 }

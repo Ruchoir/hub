@@ -125,6 +125,8 @@ src/config.rs        Config::from_env(): the settings below
 src/db.rs, cache.rs  the PostgreSQL pool (SeaORM) and the Valkey pool (fred), from the monolith
 src/health.rs        /healthz (the process is up) and /api/v1/health (whether both stores answer)
 src/product.rs       /.well-known/ruchoir-product: name, version, API majors, FEATURES
+src/auth.rs          who calls: Propolis's tokens for the hub, Publisher (a product with hub:publish)
+                     and Person (a person, for what is theirs)
 src/openapi.rs       ApiDoc, served at /api/v1/openapi.json; every route registers here
 migration/           the hub-migration crate
 relay/               the push relay (`ruchoir-push-relay`), from the monolith: run by the publisher,
@@ -149,6 +151,7 @@ compose.yaml         PostgreSQL and Valkey for a development machine
 | `HUB_VALKEY_URL` | `redis://localhost:6379` | Its Valkey; never logged |
 | `HUB_VALKEY_POOL_SIZE` | `6` | The size of the Valkey pool |
 | `HUB_AUTO_MIGRATE` | `true` | Apply pending migrations at start-up; `false` in production, where `hub migrate` applies them |
+| `HUB_ISSUER` | unset: every authenticated call refused | Propolis's issuer (`https://id.<domain>`). The hub accepts its access tokens whose audience is `HUB_PUBLIC_URL` |
 | `RUST_LOG` | `info` | Log filter |
 
 ### What will live here
