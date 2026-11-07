@@ -1,0 +1,24 @@
+# The stores the hub needs on a development machine, with the addresses its defaults name:
+#
+#     docker compose up -d
+#     cargo run
+#
+# Throwaway data only. A real instance is set up by Ruchoir/installer.
+services:
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: hub
+      POSTGRES_PASSWORD: hub
+      POSTGRES_DB: hub
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres:/var/lib/postgresql
+  valkey:
+    image: valkey/valkey:9-alpine
+    ports:
+      - "127.0.0.1:6379:6379"
+
+volumes:
+  postgres:

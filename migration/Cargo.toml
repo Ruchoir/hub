@@ -1,0 +1,24 @@
+# The database migrations of the hub, driven by SeaORM. A library: the hub applies them at start-up
+# in development, and through `hub migrate` in production.
+[package]
+name = "hub-migration"
+version = "0.1.0"
+description = "The hub's database migrations (SeaORM)."
+edition = "2021"
+rust-version = "1.96"
+license = "AGPL-3.0-only"
+repository = "https://github.com/Ruchoir/hub"
+publish = false
+
+[lib]
+name = "hub_migration"
+path = "src/lib.rs"
+
+[dependencies]
+# SeaORM's migration layer over PostgreSQL (SeaQL community, MIT/Apache-2.0), as in the products.
+sea-orm-migration = { version = "2.0.2", default-features = false, features = [
+    "sqlx-postgres",
+    "runtime-tokio",
+] }
+# The async migration trait (David Tolnay, MIT/Apache-2.0).
+async-trait = "0.1.92"

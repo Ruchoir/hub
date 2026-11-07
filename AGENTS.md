@@ -110,9 +110,43 @@ The hub is the notifications and real-time service of Ruchoir, installed with ev
 inbox, web push, phone push through the push relay, email digests, and live delivery to connected
 pages and apps (WebSocket, with SSE as a fallback).
 
-**Status:** empty. During the restructuring this repository only gets its ground: rules,
-configuration and CI. No feature is written or moved here until this service is taken up, one
-project at a time.
+**Status:** the service skeleton, on its stores: it starts, reaches PostgreSQL and Valkey, applies
+its migrations, answers its probes, describes itself and serves its contract. The skeleton is
+Propolis's (step 2.1 of the restructuring). The push relay, the inbox, push and live delivery come
+next.
+
+### Layout
+
+```
+src/main.rs          the binary: hub::run()
+src/lib.rs           run() (logs, stores, migrations, listener, graceful shutdown; `hub migrate`)
+                     and app(AppState) -> Router, inside the shared layers of ruchoir-http
+src/config.rs        Config::from_env(): the settings below
+src/db.rs, cache.rs  the PostgreSQL pool (SeaORM) and the Valkey pool (fred), from the monolith
+src/health.rs        /healthz (the process is up) and /api/v1/health (whether both stores answer)
+src/product.rs       /.well-known/ruchoir-product: name, version, API majors, FEATURES
+src/openapi.rs       ApiDoc, served at /api/v1/openapi.json; every route registers here
+migration/           the hub-migration crate
+contract/            openapi-v1.json, the recorded contract
+tests/               common/ (the stores of a test), service.rs, stores.rs, cache_reconnect.rs,
+                     contract.rs
+Dockerfile           the image: release binary, slim Debian, user 10001, health check on /healthz
+compose.yaml         PostgreSQL and Valkey for a development machine
+```
+
+### Settings
+
+| Variable | Default | What |
+|---|---|---|
+| `HUB_LISTEN` | `127.0.0.1:8080` (`0.0.0.0:8080` in the image) | Where to listen |
+| `HUB_PUBLIC_URL` | `http://localhost:8080` | The public address |
+| `HUB_TRUSTED_PROXIES` | none | Reverse proxies whose `X-Forwarded-For` is believed |
+| `HUB_DATABASE_URL` | `postgres://hub:hub@localhost:5432/hub` | Its own PostgreSQL database; never logged |
+| `HUB_DB_MAX_CONNECTIONS` | `10` | The size of the database pool |
+| `HUB_VALKEY_URL` | `redis://localhost:6379` | Its Valkey; never logged |
+| `HUB_VALKEY_POOL_SIZE` | `6` | The size of the Valkey pool |
+| `HUB_AUTO_MIGRATE` | `true` | Apply pending migrations at start-up; `false` in production, where `hub migrate` applies them |
+| `RUST_LOG` | `info` | Log filter |
 
 ### What will live here
 
@@ -141,7 +175,13 @@ This repository's own decisions go in `docs/adr/`.
 
 - The conventions check, with a clone of `Ruchoir/.github` at `$RULES`:
   `bash "$RULES/scripts/check-conventions.sh" "$RULES/common-rules.md"`, from the root.
-- The build, lint and test commands arrive with the first code, with the shared `rust` and `node`
-  workflows of `Ruchoir/.github`.
+- `cargo fmt --all --check`, `cargo clippy --all-targets --all-features -- -D warnings`,
+  `cargo test --all-features`. The CI runs them through the shared `rust` workflow, with cargo-deny,
+  next to a PostgreSQL and a Valkey; its `Image` job starts the image and asks its probes.
+- The tests that need the stores read `RUCHOIR_TEST_DATABASE_URL` and `RUCHOIR_TEST_VALKEY_URL`
+  (throwaway stores only). Without them they are skipped, except with `RUCHOIR_TEST_STORES=required`,
+  as in the CI.
+- A route added or changed: register it in `src/openapi.rs`, then
+  `RUCHOIR_UPDATE_CONTRACT=1 cargo test --test contract`.
 
 Licence: `AGPL-3.0-only` (`LICENSE`).

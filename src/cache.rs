@@ -1,8 +1,11 @@
 //! Valkey (RESP) connectivity via fred.
 //!
-//! Backs opaque server sessions today and real-time pub-sub / presence in later lots. Dev speaks
-//! plaintext RESP over the trusted Docker network; TLS would use fred's `enable-rustls-ring`
-//! feature (ring, not AWS `aws-lc-rs`) when hardening later.
+//! Backs the browser sessions, the sign-in throttle and the short-lived states of the second factors.
+//! Dev speaks plaintext RESP over the trusted Docker network; TLS would use fred's
+//! `enable-rustls-ring` feature (ring, not AWS `aws-lc-rs`) when hardening later.
+//!
+//! What happens when Valkey drops every connection is tested in `tests/cache_reconnect.rs`, a test
+//! binary of its own, since it closes the connections of every other client.
 
 use fred::prelude::{Builder, ClientLike, Config as ValkeyConfig, Error, Pool};
 
@@ -21,13 +24,12 @@ pub async fn connect_url(url: &str, pool_size: usize) -> Result<Pool, Error> {
     Ok(pool)
 }
 
-/// The builder every Valkey client of the API starts from: the command pool and the real-time
-/// subscriber.
+/// The builder every Valkey client of the hub starts from.
 ///
 /// fred's defaults are no reconnection policy and no command timeout. With them, a Valkey that
 /// restarts (an upgrade, a crash, a host reboot) closes every connection for good, and each command
-/// afterwards waits forever: sessions, presence and the health probe all hang until the API itself
-/// is restarted. So every client reconnects, retrying forever with a capped backoff, and no
+/// afterwards waits forever: sessions, the throttle and the health probe all hang until the service
+/// itself is restarted. So every client reconnects, retrying forever with a capped backoff, and no
 /// command waits longer than a few seconds for an answer.
 pub fn builder(url: &str) -> Result<Builder, Error> {
     let mut builder = Builder::from_config(ValkeyConfig::from_url(url)?);
@@ -47,8 +49,7 @@ pub fn builder(url: &str) -> Result<Builder, Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fred::interfaces::ClientLike;
-    use std::time::{Duration, Instant};
+    use std::time::Duration;
 
     #[test]
     fn every_client_reconnects_and_bounds_its_commands() {
@@ -59,45 +60,5 @@ mod tests {
             builder.get_performance_config().default_command_timeout,
             Duration::from_secs(5)
         );
-    }
-
-    /// Needs a Valkey at `VALKEY_TEST_URL` (a throwaway one, as `CLAUDE.md` describes): it kills
-    /// every other client's connection.
-    #[tokio::test]
-    async fn the_pool_answers_again_after_valkey_drops_its_connections() {
-        let Ok(url) = std::env::var("VALKEY_TEST_URL") else {
-            eprintln!("VALKEY_TEST_URL not set: skipping");
-            return;
-        };
-        let pool = connect_url(&url, 2).await.expect("pool");
-        let _: String = pool.ping(None).await.expect("first ping");
-
-        // What a Valkey restart does to the API: every connection closed under it.
-        let killer = fred::prelude::Builder::from_config(ValkeyConfig::from_url(&url).unwrap())
-            .build()
-            .expect("killer client");
-        killer.init().await.expect("killer connects");
-        let _: i64 = killer
-            .custom(
-                fred::cmd!("CLIENT"),
-                vec!["KILL", "TYPE", "normal", "SKIPME", "yes"],
-            )
-            .await
-            .expect("client kill");
-
-        let started = Instant::now();
-        loop {
-            let ping =
-                tokio::time::timeout(Duration::from_secs(6), pool.ping::<String>(None)).await;
-            if matches!(ping, Ok(Ok(_))) {
-                break;
-            }
-            assert!(
-                started.elapsed() < Duration::from_secs(15),
-                "the pool never answered again after its connections were closed"
-            );
-            tokio::time::sleep(Duration::from_millis(200)).await;
-        }
-        let _ = killer.quit().await;
     }
 }
