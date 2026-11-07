@@ -29,6 +29,9 @@ use utoipa::OpenApi;
         crate::live::ws::open,
         crate::live::sse::open,
         crate::events::intake,
+        crate::live::presence::organisation,
+        crate::live::presence::mine,
+        crate::live::presence::choose,
     ),
     tags(
         (name = "health", description = "Probes for the container runtime, the proxy and the installer"),

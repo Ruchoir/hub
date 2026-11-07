@@ -39,6 +39,11 @@ pub const CLIENT_ID: &str = "HUB_CLIENT_ID";
 pub const PAGE_ORIGINS: &str = "HUB_PAGE_ORIGINS";
 /// The subscriptions file the installer writes: which service receives which event kinds.
 pub const SUBSCRIPTIONS: &str = "HUB_SUBSCRIPTIONS";
+/// The hub's Ed25519 client key (PEM, PKCS#8) the installer generated, to read Propolis's change
+/// feed in its own name.
+pub const CLIENT_KEY: &str = "HUB_CLIENT_KEY";
+/// The id under which that key is registered with Propolis.
+pub const CLIENT_KEY_ID: &str = "HUB_CLIENT_KEY_ID";
 
 const DEFAULT_LISTEN: &str = "127.0.0.1:8080";
 const DEFAULT_PUBLIC_URL: &str = "http://localhost:8080";
@@ -73,6 +78,8 @@ pub struct Config {
     pub page_origins: Vec<String>,
     /// The subscriptions file, when there is one.
     pub subscriptions: Option<std::path::PathBuf>,
+    /// The hub's client key file and its key id, when it reads Propolis's change feed.
+    pub client_key: Option<(std::path::PathBuf, String)>,
 }
 
 impl Config {
@@ -141,6 +148,12 @@ impl Config {
             subscriptions: lookup(SUBSCRIPTIONS)
                 .filter(|v| !v.trim().is_empty())
                 .map(std::path::PathBuf::from),
+            client_key: match (lookup(CLIENT_KEY), lookup(CLIENT_KEY_ID)) {
+                (Some(path), Some(kid)) if !path.trim().is_empty() && !kid.trim().is_empty() => {
+                    Some((std::path::PathBuf::from(path), kid.trim().to_owned()))
+                }
+                _ => None,
+            },
         })
     }
 }

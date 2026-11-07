@@ -1,28 +1,43 @@
-//! Presence: the live heartbeat, and how a manual choice reads (design `docs/design/hub.md`,
-//! section 5).
+//! Presence: the live heartbeat, the presence a person chose, and who sees it (design
+//! `docs/design/hub.md`, section 5).
 //!
 //! - **Live heartbeat**: while a person holds a socket or a stream, it refreshes a Valkey key
 //!   `presence:<account>` with a short lifetime. A present key means reachable now.
-//! - **Manual choice** (`active`, `away`, `dnd`, `invisible`): how a reachable person reads to
-//!   others. It moves from Propolis's accounts to the hub with the rest of presence.
-//!
-//! Who sees whose presence (whoever shares an organisation), the manual choice's storage, counting
-//! connections across processes and announcing changes come with the replica of the organisations'
-//! members.
+//! - **Connections counted across processes** (`presence_conns:<account>`): the monolith cleared the
+//!   heartbeat when a process lost its last connection of a person, even when another process still
+//!   held one. Now a person goes offline only when their last connection anywhere goes.
+//! - **Manual choice** (`active`, `away`, `dnd`, `invisible`, or automatic): how a reachable person
+//!   reads to others, kept by the hub (it moved from Propolis's accounts).
+//! - **Who sees it**: whoever shares an organisation, from the members' replica. A change (online,
+//!   offline, a new choice) is pushed to them as `hub.presence.changed`.
 
+use axum::extract::{Path, State};
+use axum::http::StatusCode;
+use axum::Json;
 use fred::interfaces::KeysInterface;
 use fred::prelude::Pool;
 use fred::types::Expiration;
+use ruchoir_events::ClientFrame;
+use ruchoir_http::Problem;
+use sea_orm::{ConnectionTrait, DbBackend, DbErr, Statement};
+use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 use uuid::Uuid;
 
 use super::ws::HEARTBEAT_SECS;
+use crate::auth::Person;
+use crate::{replica, AppState};
 
 const PREFIX: &str = "presence:";
+const CONNS_PREFIX: &str = "presence_conns:";
+
+/// The manual choices a person may make.
+pub const CHOICES: [&str; 4] = ["active", "away", "dnd", "invisible"];
 
 /// How long a heartbeat holds: two of them, so one late ping does not read as gone.
 pub const TTL_SECS: i64 = 2 * HEARTBEAT_SECS as i64;
 
-/// Refresh an account's heartbeat.
+/// Refresh an account's heartbeat, and the count of its connections with it.
 pub async fn heartbeat(valkey: &Pool, account: Uuid) {
     if let Err(error) = valkey
         .set::<(), _, _>(
@@ -36,16 +51,214 @@ pub async fn heartbeat(valkey: &Pool, account: Uuid) {
     {
         tracing::warn!(%error, "cannot write a presence heartbeat");
     }
+    // A count nothing refreshes lapses with its heartbeat: a process that died leaves no ghost.
+    let _ = valkey
+        .expire::<(), _>(format!("{CONNS_PREFIX}{account}"), TTL_SECS, None)
+        .await;
 }
 
-/// Clear an account's heartbeat (its last connection here went).
+/// Clear an account's heartbeat.
 pub async fn clear(valkey: &Pool, account: Uuid) {
-    let _ = valkey.del::<u64, _>(format!("{PREFIX}{account}")).await;
+    let _ = valkey
+        .del::<u64, _>(vec![
+            format!("{PREFIX}{account}"),
+            format!("{CONNS_PREFIX}{account}"),
+        ])
+        .await;
 }
 
 /// Whether an account has a live heartbeat.
 pub async fn is_online(valkey: &Pool, account: Uuid) -> bool {
     matches!(valkey.exists::<u64, _>(format!("{PREFIX}{account}")).await, Ok(n) if n > 0)
+}
+
+/// A connection of `account` opened, on any process: online, and announced when it was the first.
+pub async fn arrived(state: &AppState, account: Uuid) {
+    let count: i64 = state
+        .valkey
+        .incr(format!("{CONNS_PREFIX}{account}"))
+        .await
+        .unwrap_or(1);
+    heartbeat(&state.valkey, account).await;
+    if count == 1 {
+        announce(state, account).await;
+    }
+}
+
+/// A connection of `account` closed: offline, and announced, when it was the last one anywhere.
+pub async fn departed(state: &AppState, account: Uuid) {
+    let count: i64 = state
+        .valkey
+        .decr(format!("{CONNS_PREFIX}{account}"))
+        .await
+        .unwrap_or(0);
+    if count <= 0 {
+        clear(&state.valkey, account).await;
+        announce(state, account).await;
+    }
+}
+
+async fn choice_of(db: &impl ConnectionTrait, account: Uuid) -> Result<Option<String>, DbErr> {
+    let row = db
+        .query_one_raw(Statement::from_sql_and_values(
+            DbBackend::Postgres,
+            "SELECT choice FROM presence_choices WHERE account_id = $1",
+            [account.into()],
+        ))
+        .await?;
+    row.map(|r| r.try_get("", "choice")).transpose()
+}
+
+/// What others see of `account` now.
+pub async fn seen_by_others(state: &AppState, account: Uuid) -> &'static str {
+    let choice = choice_of(&state.db, account).await.ok().flatten();
+    effective_for_others(choice.as_deref(), is_online(&state.valkey, account).await)
+}
+
+/// Tell everyone who shares an organisation with `account` how it reads now.
+pub async fn announce(state: &AppState, account: Uuid) {
+    let audience = match replica::co_members(&state.db, account).await {
+        Ok(audience) => audience,
+        Err(error) => {
+            tracing::warn!(%error, "cannot read who shares an organisation");
+            return;
+        }
+    };
+    let presence = seen_by_others(state, account).await;
+    if let Ok(frame) = ClientFrame::new(
+        "hub.presence.changed",
+        serde_json::json!({ "account": account, "presence": presence }),
+    ) {
+        state.fanout.publish(audience, frame).await;
+    }
+}
+
+/// One member's presence.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct MemberPresence {
+    pub account: Uuid,
+    /// `active`, `away`, `dnd` or `offline`.
+    pub presence: String,
+}
+
+/// The presence of an organisation's members, for one of them.
+#[utoipa::path(
+    get,
+    path = "/api/v1/organisations/{id}/presence",
+    tag = "live",
+    params(("id" = Uuid, Path, description = "The organisation")),
+    responses(
+        (status = 200, description = "Every member's presence", body = [MemberPresence]),
+        (status = 404, description = "Not one of the reader's organisations")
+    )
+)]
+pub async fn organisation(
+    State(state): State<AppState>,
+    person: Person,
+    Path(id): Path<Uuid>,
+) -> Result<Json<Vec<MemberPresence>>, Problem> {
+    let internal = |_| Problem::internal();
+    if !replica::is_member(&state.db, id, person.account)
+        .await
+        .map_err(internal)?
+    {
+        return Err(Problem::not_found());
+    }
+    let rows = state
+        .db
+        .query_all_raw(Statement::from_sql_and_values(
+            DbBackend::Postgres,
+            "SELECT m.account_id, c.choice FROM organisation_members m              LEFT JOIN presence_choices c ON c.account_id = m.account_id              WHERE m.organisation_id = $1 ORDER BY m.account_id",
+            [id.into()],
+        ))
+        .await
+        .map_err(internal)?;
+    let mut out = Vec::with_capacity(rows.len());
+    for row in rows {
+        let account: Uuid = row.try_get("", "account_id").map_err(internal)?;
+        let choice: Option<String> = row.try_get("", "choice").map_err(internal)?;
+        let online = is_online(&state.valkey, account).await;
+        out.push(MemberPresence {
+            account,
+            presence: effective_for_others(choice.as_deref(), online).to_owned(),
+        });
+    }
+    Ok(Json(out))
+}
+
+/// The person's own presence, as they see it.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct MyPresence {
+    /// What they chose, or `null` for automatic.
+    pub choice: Option<String>,
+    /// How it reads to them (`invisible` stays visible to its author).
+    pub presence: String,
+}
+
+/// Read one's own presence.
+#[utoipa::path(
+    get,
+    path = "/api/v1/me/presence",
+    tag = "live",
+    responses((status = 200, description = "The person's presence", body = MyPresence))
+)]
+pub async fn mine(
+    State(state): State<AppState>,
+    person: Person,
+) -> Result<Json<MyPresence>, Problem> {
+    let choice = choice_of(&state.db, person.account)
+        .await
+        .map_err(|_| Problem::internal())?;
+    let online = is_online(&state.valkey, person.account).await;
+    Ok(Json(MyPresence {
+        presence: effective_for_self(choice.as_deref(), online).to_owned(),
+        choice,
+    }))
+}
+
+/// A presence to choose.
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct Choice {
+    /// `active`, `away`, `dnd`, `invisible`, or `null` for automatic.
+    pub choice: Option<String>,
+}
+
+/// Choose one's presence; everyone who shares an organisation sees the change.
+#[utoipa::path(
+    put,
+    path = "/api/v1/me/presence",
+    tag = "live",
+    request_body = Choice,
+    responses(
+        (status = 204, description = "Chosen"),
+        (status = 400, description = "Not a presence one may choose")
+    )
+)]
+pub async fn choose(
+    State(state): State<AppState>,
+    person: Person,
+    Json(body): Json<Choice>,
+) -> Result<StatusCode, Problem> {
+    let statement = match body.choice.as_deref() {
+        None => Statement::from_sql_and_values(
+            DbBackend::Postgres,
+            "DELETE FROM presence_choices WHERE account_id = $1",
+            [person.account.into()],
+        ),
+        Some(choice) if CHOICES.contains(&choice) => Statement::from_sql_and_values(
+            DbBackend::Postgres,
+            "INSERT INTO presence_choices (account_id, choice) VALUES ($1, $2)              ON CONFLICT (account_id) DO UPDATE SET choice = $2, updated_at = now()",
+            [person.account.into(), choice.into()],
+        ),
+        Some(_) => return Err(Problem::bad_request().with_reason("choice")),
+    };
+    state
+        .db
+        .execute_raw(statement)
+        .await
+        .map_err(|_| Problem::internal())?;
+    announce(&state, person.account).await;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 /// The presence a *third party* sees. `invisible` and an absent heartbeat both read as `offline`.

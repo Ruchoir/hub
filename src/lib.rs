@@ -17,6 +17,7 @@ pub mod inbox;
 pub mod live;
 pub mod openapi;
 pub mod product;
+pub mod replica;
 
 use std::net::SocketAddr;
 use std::process::ExitCode;
@@ -54,6 +55,8 @@ pub struct AppState {
     pub fanout: Arc<live::Fanout>,
     /// Every service's event keys, from Propolis.
     pub event_keys: events::EventKeys,
+    /// The members' replica, when the hub can read Propolis's change feed.
+    pub replica: Option<Arc<replica::Replica>>,
 }
 
 impl FromRef<AppState> for TrustedProxies {
@@ -157,6 +160,22 @@ async fn start(config: Config) -> Result<(), Failure> {
             "event subscriptions applied"
         );
     }
+    let replica = match (&config.issuer, &config.client_id, &config.client_key) {
+        (Some(issuer), Some(client_id), Some((path, kid))) => {
+            let pem = std::fs::read_to_string(path)
+                .map_err(|error| format!("cannot read {}: {error}", path.display()))?;
+            let credentials = ruchoir_auth::Credentials::from_pem(client_id.clone(), &pem, kid)?;
+            let replica = replica::Replica::new(issuer, credentials, http.clone());
+            replica.spawn(db.clone());
+            Some(replica)
+        }
+        _ => {
+            tracing::warn!(
+                "no HUB_CLIENT_KEY: the members' replica is not kept, presence reaches nobody"
+            );
+            None
+        }
+    };
     events::spawn(db.clone(), http);
     let state = AppState {
         config: Arc::new(config),
@@ -165,6 +184,7 @@ async fn start(config: Config) -> Result<(), Failure> {
         verifier,
         fanout,
         event_keys,
+        replica,
     };
     serve(state).await?;
     Ok(())

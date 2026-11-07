@@ -57,6 +57,7 @@ async fn live() -> Option<Live> {
             .await
             .unwrap(),
         event_keys: hub::events::EventKeys::fixed(ruchoir_events::signature::PublicKeys::new()),
+        replica: None,
         config: Arc::new(config),
         db,
         valkey,

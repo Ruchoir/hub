@@ -52,7 +52,7 @@ pub async fn open(
 async fn serve(state: AppState, opener: Opener, socket: WebSocket) {
     let account = opener.account;
     let (id, mut rx) = state.fanout.register(account, opener.sid.clone());
-    presence::heartbeat(state.fanout.valkey(), account).await;
+    presence::arrived(&state, account).await;
     let (mut sink, mut stream) = socket.split();
 
     let opened = Instant::now();
@@ -108,10 +108,8 @@ async fn serve(state: AppState, opener: Opener, socket: WebSocket) {
     left(&state, account, id).await;
 }
 
-/// A connection ended: forget it, and the person's heartbeat with their last one here.
+/// A connection ended: forget it here, and count it out of the person's connections anywhere.
 pub async fn left(state: &AppState, account: Uuid, id: super::fanout::ConnId) {
-    let was_last = state.fanout.unregister(account, id);
-    if was_last && !state.fanout.is_locally_connected(account) {
-        presence::clear(state.fanout.valkey(), account).await;
-    }
+    state.fanout.unregister(account, id);
+    presence::departed(state, account).await;
 }

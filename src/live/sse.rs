@@ -59,7 +59,7 @@ pub async fn open(
     };
     let account = opener.account;
     let (id, rx) = state.fanout.register(account, opener.sid);
-    presence::heartbeat(state.fanout.valkey(), account).await;
+    presence::arrived(&state, account).await;
     let beat_state = state.clone();
     let heartbeat = tokio::spawn(async move {
         let mut ticker = tokio::time::interval(Duration::from_secs(HEARTBEAT_SECS));
