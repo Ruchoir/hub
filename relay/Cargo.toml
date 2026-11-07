@@ -1,24 +1,26 @@
 [package]
 name = "ruchoir-push-relay"
 version = "0.1.0"
-edition.workspace = true
-rust-version.workspace = true
-license.workspace = true
-repository.workspace = true
+edition = "2021"
+rust-version = "1.96"
+license = "AGPL-3.0-only"
+repository = "https://github.com/Ruchoir/hub"
+publish = false
 description = "The publisher-run relay that wakes Ruchoir's phone apps through APNs and FCM, without content (ADR 0006)."
 
 [dependencies]
-tokio = { workspace = true }
-axum = { workspace = true }
-serde = { workspace = true }
-serde_json = { workspace = true }
-tracing = { workspace = true }
-tracing-subscriber = { workspace = true }
+# The same versions as the hub's, which were the monolith's workspace's.
+tokio = { version = "1.53", features = ["rt-multi-thread", "net", "macros", "signal", "time", "sync"] }
+axum = "0.8"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 # HTTP/2 for APNs, rustls with the community `ring` provider (no AWS crypto, as the API).
 reqwest = { version = "0.12", default-features = false, features = ["json", "http2", "rustls-tls-webpki-roots"] }
 # The APNs (ES256) and Google service-account (RS256) tokens, on the RustCrypto backend.
 jsonwebtoken = { version = "11.1.0", default-features = false, features = ["use_pem", "rust_crypto"] }
 
 [dev-dependencies]
-tower = { workspace = true }
+tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"

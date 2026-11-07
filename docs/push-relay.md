@@ -2,7 +2,7 @@
 
 The phone apps are woken through Apple (APNs) and Google (FCM), and only the publisher of the apps
 may hold the keys that let a server push to them. So instances do not push to phones themselves: they
-ask the **push relay** (`apps/push-relay`), run by the publisher, to wake a device, and the relay
+ask the **push relay** (`relay/` of this repository), run by the publisher, to wake a device, and the relay
 sends a constant push. The phone then asks its instances what to show: the push does not say which
 one sent it, so a phone signed in to several asks each of them and shows the newest
 ([ADR 0007](adr/0007-several-instances-in-the-apps.md)). Why, and what crosses:
@@ -65,7 +65,7 @@ Neither key ever goes in the repository, in a chat, or anywhere but the relay's 
 The image is built from the repository root:
 
 ```bash
-docker build -f apps/push-relay/Dockerfile -t ruchoir-push-relay:0.1.0 .
+docker build -f relay/Dockerfile -t ruchoir-push-relay:0.1.0 .
 ```
 
 ### Production (the website's server)
@@ -96,7 +96,8 @@ deployed by a tag (below). Once, by hand:
 
 ### Releasing
 
-A tag `push-relay-vX.Y.Z` (`.github/workflows/push-relay-release.yml`) builds the image
+Until its release moves here, with its secrets, the relay is released from `Ruchoir/ruchoir`: a
+tag `push-relay-vX.Y.Z` there (`.github/workflows/push-relay-release.yml`) builds the image
 (`registry.ruchoir.com/ruchoir/push-relay:vX.Y.Z`), pushes it, and runs `push-relay-deploy` through
 the `deploy` account with `infra/push-relay` as the bundle: it pulls the image, starts it
 (`/opt/push-relay`, `infra/push-relay/compose.yml`), waits for its health check and puts the previous

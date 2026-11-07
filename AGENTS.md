@@ -112,8 +112,8 @@ pages and apps (WebSocket, with SSE as a fallback).
 
 **Status:** the service skeleton, on its stores: it starts, reaches PostgreSQL and Valkey, applies
 its migrations, answers its probes, describes itself and serves its contract. The skeleton is
-Propolis's (step 2.1 of the restructuring). The push relay, the inbox, push and live delivery come
-next.
+Propolis's (step 2.1 of the restructuring). The push relay is here; the inbox, push and live
+delivery come next.
 
 ### Layout
 
@@ -127,6 +127,9 @@ src/health.rs        /healthz (the process is up) and /api/v1/health (whether bo
 src/product.rs       /.well-known/ruchoir-product: name, version, API majors, FEATURES
 src/openapi.rs       ApiDoc, served at /api/v1/openapi.json; every route registers here
 migration/           the hub-migration crate
+relay/               the push relay (`ruchoir-push-relay`), from the monolith: run by the publisher,
+                     apart from every instance, it wakes the phone apps through APNs and FCM without
+                     content. Its own Dockerfile; see docs/push-relay.md
 contract/            openapi-v1.json, the recorded contract
 tests/               common/ (the stores of a test), service.rs, stores.rs, cache_reconnect.rs,
                      contract.rs

@@ -1,20 +1,19 @@
-# The push relay (ADR 0006, docs/push-relay.md). Built from the repository root:
-#   docker build -f apps/push-relay/Dockerfile -t ruchoir-push-relay:<version> .
-# Cargo loads every workspace member's manifest, so the other members are copied too; only the
-# relay is compiled.
+# The push relay (docs/push-relay.md), run by the publisher, apart from every instance's hub. Built
+# from the repository root:
+#   docker build -f relay/Dockerfile -t ruchoir-push-relay:<version> .
+# Cargo loads every workspace member's manifest, so the hub's are copied too; only the relay is
+# compiled.
 
 FROM rust:1.96-slim-bookworm AS build
 WORKDIR /build
-COPY rust-toolchain.toml Cargo.toml ./
-COPY Cargo.lock* ./
-COPY apps/api ./apps/api
-COPY apps/push-relay ./apps/push-relay
-COPY migrations ./migrations
-COPY packages/importer ./packages/importer
+COPY rust-toolchain.toml Cargo.toml Cargo.lock ./
+COPY src ./src
+COPY migration ./migration
+COPY relay ./relay
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=/build/target \
-    cargo build --release -p ruchoir-push-relay \
+    cargo build --release --locked -p ruchoir-push-relay \
     && cp target/release/ruchoir-push-relay /usr/local/bin/ruchoir-push-relay
 
 # User and group 10002, fixed: the keys' directory on the host is given to that group.
