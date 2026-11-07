@@ -24,10 +24,12 @@ path = "src/main.rs"
 [dependencies]
 # The shared HTTP layer of every Ruchoir service (Ruchoir/core), read from its release tag (ADR 0013).
 ruchoir-http = { git = "https://github.com/Ruchoir/core", tag = "v0.2.0" }
+# The frame a product hands the hub and the hub pushes to clients (Ruchoir/core).
+ruchoir-events = { git = "https://github.com/Ruchoir/core", tag = "v0.2.0" }
 # Propolis's access tokens checked as every product checks them, from the same core release.
 ruchoir-auth = { git = "https://github.com/Ruchoir/core", tag = "v0.2.0" }
 # The web framework every Ruchoir service is built on (tokio-rs community, MIT).
-axum = "0.8"
+axum = { version = "0.8", features = ["ws"] }
 # The async runtime: the listener, and the signals of a graceful shutdown (tokio-rs community, MIT).
 tokio = { version = "1.53", features = ["rt-multi-thread", "net", "macros", "signal", "time"] }
 # Structured logs filtered by RUST_LOG (tokio-rs community, MIT).
@@ -49,13 +51,25 @@ sea-orm = { version = "2.0.2", default-features = false, features = [
 ] }
 hub-migration = { path = "migration" }
 # Valkey through fred (Alec Embke, community, MIT), as in the products.
-fred = "10.1.0"
+fred = { version = "10.1.0", features = ["subscriber-client"] }
 # Identifiers (uuid-rs community, MIT/Apache-2.0).
 uuid = { version = "1.26", features = ["v4", "serde"] }
 # Timestamps (time-rs community, MIT/Apache-2.0).
 time = "0.3.55"
 
+# The halves of a socket, and a channel as a stream for SSE (tokio-rs and rust-lang communities, MIT).
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
+tokio-stream = "0.1"
+# A ticket's digest (RustCrypto, community, MIT/Apache-2.0) and its randomness from the operating
+# system (rust-random community, MIT/Apache-2.0).
+sha2 = "0.11"
+getrandom = "0.4"
+# The back-channel logout form (Servo project, MIT/Apache-2.0).
+form_urlencoded = "1"
+
 [dev-dependencies]
+# A WebSocket client, to open the hub socket in the tests (snapview community, MIT).
+tokio-tungstenite = "0.30"
 # Signing stand-in Propolis tokens in the tests (Frank Denis, France; ISC), as Propolis does.
 jwt-simple = { version = "0.15", default-features = false, features = ["pure-rust"] }
 ruchoir-contract = { git = "https://github.com/Ruchoir/core", tag = "v0.2.0" }

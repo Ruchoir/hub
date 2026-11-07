@@ -32,6 +32,11 @@ pub const AUTO_MIGRATE: &str = "HUB_AUTO_MIGRATE";
 /// Propolis's issuer, whose access tokens the hub accepts. Unset: every authenticated call is
 /// refused.
 pub const ISSUER: &str = "HUB_ISSUER";
+/// The hub's client id at Propolis: the audience of the logout tokens it receives.
+pub const CLIENT_ID: &str = "HUB_CLIENT_ID";
+/// The origins of the instance's product pages, comma-separated: the only pages that may open a
+/// socket.
+pub const PAGE_ORIGINS: &str = "HUB_PAGE_ORIGINS";
 
 const DEFAULT_LISTEN: &str = "127.0.0.1:8080";
 const DEFAULT_PUBLIC_URL: &str = "http://localhost:8080";
@@ -60,6 +65,10 @@ pub struct Config {
     pub auto_migrate: bool,
     /// Propolis's issuer, when the hub accepts its tokens.
     pub issuer: Option<String>,
+    /// The hub's client id at Propolis.
+    pub client_id: Option<String>,
+    /// The product pages' origins.
+    pub page_origins: Vec<String>,
 }
 
 impl Config {
@@ -116,6 +125,15 @@ impl Config {
             issuer: lookup(ISSUER)
                 .map(|v| v.trim().trim_end_matches('/').to_owned())
                 .filter(|v| !v.is_empty()),
+            client_id: lookup(CLIENT_ID)
+                .map(|v| v.trim().to_owned())
+                .filter(|v| !v.is_empty()),
+            page_origins: lookup(PAGE_ORIGINS)
+                .unwrap_or_default()
+                .split(',')
+                .map(|o| o.trim().trim_end_matches('/').to_owned())
+                .filter(|o| !o.is_empty())
+                .collect(),
         })
     }
 }
