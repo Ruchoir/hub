@@ -32,6 +32,9 @@ use utoipa::OpenApi;
         crate::live::presence::organisation,
         crate::live::presence::mine,
         crate::live::presence::choose,
+        crate::prefs::read,
+        crate::prefs::save,
+        crate::prefs::set_level,
     ),
     tags(
         (name = "health", description = "Probes for the container runtime, the proxy and the installer"),
@@ -39,6 +42,7 @@ use utoipa::OpenApi;
         (name = "inbox", description = "What a person was told about, published by the products"),
         (name = "live", description = "Frames pushed live to the pages and apps a person has open"),
         (name = "events", description = "Signed server events, delivered to the services that subscribed"),
+        (name = "preferences", description = "What reaches a person, through which door, and when"),
     )
 )]
 pub struct ApiDoc;

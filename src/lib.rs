@@ -16,6 +16,7 @@ pub mod health;
 pub mod inbox;
 pub mod live;
 pub mod openapi;
+pub mod prefs;
 pub mod product;
 pub mod replica;
 
@@ -79,6 +80,14 @@ pub fn app(state: AppState) -> Router {
         .merge(inbox::router())
         .merge(live::routes::router())
         .merge(events::router())
+        .route(
+            "/api/v1/me/notification-preferences",
+            get(prefs::read).put(prefs::save),
+        )
+        .route(
+            "/api/v1/me/organisations/{id}/notification-level",
+            axum::routing::put(prefs::set_level),
+        )
         .fallback(|| async { Problem::not_found() })
         .with_state(state)
         .layer(guard)

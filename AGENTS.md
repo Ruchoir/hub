@@ -138,6 +138,8 @@ src/events.rs        server events (ADR 0015): the keys from Propolis, the subsc
                      (signature, source, kind) and the delivery with retries for a day
 src/replica.rs       the members' replica, read from Propolis's change feed (/api/v1/changes) every minute
                      and at once when one of its events arrives
+src/prefs.rs         notification preferences, from the monolith's: categories by channel (app, mail),
+                     a level per organisation, quiet hours, do not disturb; obeyed by the inbox
 src/openapi.rs       ApiDoc, served at /api/v1/openapi.json; every route registers here
 migration/           the hub-migration crate
 relay/               the push relay (`ruchoir-push-relay`), from the monolith: run by the publisher,

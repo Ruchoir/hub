@@ -1,6 +1,40 @@
 {
   "components": {
     "schemas": {
+      "Categories": {
+        "description": "Which categories reach someone through one channel.",
+        "properties": {
+          "activity": {
+            "default": true,
+            "type": "boolean"
+          },
+          "direct": {
+            "default": true,
+            "type": "boolean"
+          },
+          "invitation": {
+            "default": true,
+            "type": "boolean"
+          },
+          "mention": {
+            "default": true,
+            "type": "boolean"
+          },
+          "notice": {
+            "default": true,
+            "type": "boolean"
+          },
+          "reminder": {
+            "default": true,
+            "type": "boolean"
+          },
+          "reply": {
+            "default": true,
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
       "Choice": {
         "description": "A presence to choose.",
         "properties": {
@@ -103,6 +137,19 @@
         ],
         "type": "object"
       },
+      "Level": {
+        "description": "A level for one organisation.",
+        "properties": {
+          "level": {
+            "description": "`all`, `mentions`, `none`, or `null` to go back to `all`.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
       "MemberPresence": {
         "description": "One member's presence.",
         "properties": {
@@ -139,6 +186,81 @@
         "required": [
           "presence"
         ],
+        "type": "object"
+      },
+      "NotificationPrefs": {
+        "description": "A person's own notification settings.\n\nEvery field has a default, and a stored document missing a field (written before it existed)\ntakes that default rather than failing to load.",
+        "properties": {
+          "app": {
+            "default": {
+              "activity": true,
+              "direct": true,
+              "invitation": true,
+              "mention": true,
+              "notice": true,
+              "reminder": true,
+              "reply": true
+            },
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Categories",
+                "description": "What reaches them in the app and by push."
+              }
+            ]
+          },
+          "email": {
+            "default": true,
+            "description": "The mail fallback's master switch, then what reaches them by mail.",
+            "type": "boolean"
+          },
+          "email_categories": {
+            "default": {
+              "activity": false,
+              "direct": true,
+              "invitation": true,
+              "mention": true,
+              "notice": true,
+              "reminder": true,
+              "reply": true
+            },
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Categories"
+              }
+            ]
+          },
+          "enabled": {
+            "default": true,
+            "description": "Master switch: off, nothing notifies, anywhere.",
+            "type": "boolean"
+          },
+          "quiet_from": {
+            "default": "21:00",
+            "description": "Start of the quiet window, `HH:MM`, local time; may be later than `quiet_to` (overnight).",
+            "type": "string"
+          },
+          "quiet_hours": {
+            "default": false,
+            "description": "Hold notifications back during the window below.",
+            "type": "boolean"
+          },
+          "quiet_to": {
+            "default": "08:00",
+            "description": "End of the quiet window, `HH:MM`, local time.",
+            "type": "string"
+          },
+          "sound": {
+            "default": true,
+            "description": "Play a sound with a notification.",
+            "type": "boolean"
+          },
+          "utc_offset_minutes": {
+            "default": 0,
+            "description": "Offset of the person's clock from UTC, in minutes (`+120` in Paris in summer).",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
         "type": "object"
       },
       "Page": {
@@ -762,6 +884,94 @@
         ]
       }
     },
+    "/api/v1/me/notification-preferences": {
+      "get": {
+        "operationId": "read",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationPrefs"
+                }
+              }
+            },
+            "description": "The settings, with the defaults for what was never saved"
+          }
+        },
+        "summary": "Read one's own notification settings.",
+        "tags": [
+          "preferences"
+        ]
+      },
+      "put": {
+        "operationId": "save",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NotificationPrefs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Saved"
+          },
+          "400": {
+            "description": "Not settings the hub can act on (`reason`: `quiet_hours`, `utc_offset`)"
+          }
+        },
+        "summary": "Save one's own notification settings, whole.",
+        "tags": [
+          "preferences"
+        ]
+      }
+    },
+    "/api/v1/me/organisations/{id}/notification-level": {
+      "put": {
+        "operationId": "set_level",
+        "parameters": [
+          {
+            "description": "The organisation",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Level"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Set"
+          },
+          "400": {
+            "description": "Not a level"
+          },
+          "404": {
+            "description": "Not one of the person's organisations"
+          }
+        },
+        "summary": "Set how much one organisation notifies the person.",
+        "tags": [
+          "preferences"
+        ]
+      }
+    },
     "/api/v1/me/presence": {
       "get": {
         "operationId": "mine",
@@ -889,6 +1099,10 @@
     {
       "description": "Signed server events, delivered to the services that subscribed",
       "name": "events"
+    },
+    {
+      "description": "What reaches a person, through which door, and when",
+      "name": "preferences"
     }
   ]
 }
