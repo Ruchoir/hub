@@ -12,6 +12,7 @@ pub mod cache;
 pub mod config;
 pub mod db;
 pub mod health;
+pub mod inbox;
 pub mod openapi;
 pub mod product;
 
@@ -66,6 +67,7 @@ pub fn app(state: AppState) -> Router {
         .route("/api/v1/health", get(health::health))
         .route("/api/v1/openapi.json", get(openapi::contract))
         .route("/.well-known/ruchoir-product", get(product::describe))
+        .merge(inbox::router())
         .fallback(|| async { Problem::not_found() })
         .with_state(state)
         .layer(guard)

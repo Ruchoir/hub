@@ -19,10 +19,15 @@ use utoipa::OpenApi;
         crate::health::healthz,
         crate::health::health,
         crate::product::describe,
+        crate::inbox::publish,
+        crate::inbox::read,
+        crate::inbox::mark_read,
+        crate::inbox::mark_all_read,
     ),
     tags(
         (name = "health", description = "Probes for the container runtime, the proxy and the installer"),
         (name = "product", description = "What the service is and what it can do"),
+        (name = "inbox", description = "What a person was told about, published by the products"),
     )
 )]
 pub struct ApiDoc;

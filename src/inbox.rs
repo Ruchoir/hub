@@ -1,729 +1,436 @@
-//! In-app notifications: the per-user inbox fed by mentions, direct messages and thread replies.
+//! The inbox: what a person was told about, by every product (design `docs/design/hub.md`, sections 2
+//! and 3).
 //!
-//! Notifications are created inside the [`super::messages::send_message`] transaction (so a message
-//! and its notifications commit together), then pushed over the hub to each recipient. This module
-//! owns the recipient computation, the persistence helper, the DTO hydration and the read endpoints.
-
-use std::collections::{HashMap, HashSet};
+//! From the monolith's notifications, minus what only the chat knows (who a message notifies, a
+//! reaction, an edit): the hub cannot read a product's tables, so a product publishes everything an
+//! entry shows, and the hub keeps it as it was published.
+//!
+//! - **Publishing** (`POST /api/v1/inbox`, a product with `hub:publish`): one entry per recipient the
+//!   product computed. Its `kind` is the product's own (`chat.mention` from the chat), its `category`
+//!   one of the few the hub knows, which decide urgency, preferences and mail.
+//! - **Reading** (`GET /api/v1/me/inbox`, a person): newest first, by pages, with what is unread.
+//! - **Marking read**, one entry or all of them (of one organisation, when asked). Idempotent.
+//!
+//! Who an entry is for is the product's decision; the hub never widens or narrows it (ADR 0003).
 
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
-use axum::Json;
-use sea_orm::sea_query::Expr;
-use sea_orm::ActiveValue::Set;
-use sea_orm::{
-    ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseTransaction, EntityTrait,
-    IntoActiveModel, PaginatorTrait, QueryFilter, QueryOrder, QuerySelect,
-};
-use serde::Deserialize;
+use axum::routing::{get, post};
+use axum::{Json, Router};
+use ruchoir_http::Problem;
+use sea_orm::{ConnectionTrait, DbBackend, DbErr, QueryResult, Statement};
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
+use utoipa::{IntoParams, ToSchema};
 use uuid::Uuid;
 
-use crate::auth::extract::AuthSession;
-use crate::entities::{messages, notifications, users};
-use crate::notify::prefs;
-use crate::realtime::event::RealtimeEnvelope;
-use crate::state::AppState;
-
-use super::dto::{rfc3339, NotificationDto, NotificationPage};
-use super::error::ApiError;
+use crate::auth::{Person, Publisher};
+use crate::AppState;
 
 const DEFAULT_LIMIT: u64 = 30;
 const MAX_LIMIT: u64 = 100;
-const PREVIEW_CHARS: usize = 140;
+/// The most recipients one publication may name.
+pub const MAX_RECIPIENTS: usize = 10_000;
+/// The largest `variables` object, serialised.
+pub const MAX_VARIABLES_BYTES: usize = 4096;
 
-/// Relative priority of the notification kinds, so a user who is both mentioned and a DM participant
-/// (or the replied-to author) gets a single, most-specific notification.
-///
-/// `broadcast` (`@channel`, `@here`) sits below a mention by name and above a reply: being one of
-/// fifty people addressed at once is a weaker claim on someone's attention than being named, and
-/// the client is entitled to treat it differently, which it cannot do if the two arrive under the
-/// same kind.
-fn rank(kind: &str) -> u8 {
-    match kind {
-        "mention" => 4,
-        "broadcast" => 3,
-        "reply" => 2,
-        "dm" => 1,
-        _ => 0,
-    }
+/// The categories the hub knows: what decides urgency, preferences and mail.
+pub const CATEGORIES: &[&str] = &[
+    "mention",
+    "reply",
+    "direct",
+    "activity",
+    "reminder",
+    "invitation",
+    "notice",
+];
+
+fn internal(error: DbErr) -> Problem {
+    tracing::error!(%error, "inbox store");
+    Problem::internal()
 }
 
-/// Collapse the candidate recipients for a message into one `(user, kind)` per user, keeping the
-/// highest-priority kind and never notifying the author of their own message.
-pub fn compute_recipients(
-    author_id: Uuid,
-    mention_user_ids: &[Uuid],
-    broadcast_user_ids: &[Uuid],
-    dm_recipients: &[Uuid],
-    reply_target: Option<Uuid>,
-) -> Vec<(Uuid, &'static str)> {
-    let mut best: HashMap<Uuid, &'static str> = HashMap::new();
-    let mut consider = |user_id: Uuid, kind: &'static str| {
-        if user_id == author_id {
-            return;
+/// What a product publishes to the inbox.
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct Publication {
+    /// `<product>.<name>`, the product being the publisher (`chat.mention`).
+    pub kind: String,
+    /// One of `mention`, `reply`, `direct`, `activity`, `reminder`, `invitation`, `notice`.
+    pub category: String,
+    /// The organisation it happened in, if any.
+    pub organisation: Option<Uuid>,
+    /// Who did it, if anyone.
+    pub actor: Option<Uuid>,
+    /// The product's object, an id only the product reads.
+    pub object: String,
+    /// Where the entry leads: an `https` address of the product.
+    pub link: String,
+    /// What the entry shows, as it stood: names and an excerpt (`{"place": "#général"}`).
+    #[serde(default)]
+    pub variables: serde_json::Map<String, Value>,
+    /// The accounts it is for, as the product computed them.
+    pub recipients: Vec<Uuid>,
+}
+
+/// How many entries a publication made.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct Published {
+    pub entries: usize,
+}
+
+/// Why a publication is refused, as the `reason` of a `400`.
+fn refuse(reason: &'static str) -> Problem {
+    Problem::bad_request().with_reason(reason)
+}
+
+impl Publication {
+    /// Check a publication from `product`: its recipients without repeats, or the reason it is refused.
+    fn check(&self, product: &str) -> Result<Vec<Uuid>, &'static str> {
+        let (prefix, name) = self.kind.split_once('.').ok_or("kind")?;
+        // A product publishes under its own name, never another's.
+        if prefix != product || name.is_empty() {
+            return Err("kind_not_yours");
         }
-        let keep = best
-            .get(&user_id)
-            .map(|current| rank(kind) > rank(current))
-            .unwrap_or(true);
-        if keep {
-            best.insert(user_id, kind);
+        let shaped = self
+            .kind
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_' || b == b'.');
+        if !shaped || self.kind.len() > 100 {
+            return Err("kind");
         }
-    };
-
-    for &user_id in mention_user_ids {
-        consider(user_id, "mention");
-    }
-    for &user_id in broadcast_user_ids {
-        consider(user_id, "broadcast");
-    }
-    if let Some(target) = reply_target {
-        consider(target, "reply");
-    }
-    for &user_id in dm_recipients {
-        consider(user_id, "dm");
-    }
-
-    best.into_iter().collect()
-}
-
-/// Persist one notification per recipient inside the sending transaction, returning the created rows
-/// so the caller can fan them out.
-pub async fn create_for_message(
-    txn: &DatabaseTransaction,
-    actor_id: Uuid,
-    conversation_id: Uuid,
-    message_id: Uuid,
-    recipients: &[(Uuid, &'static str)],
-) -> Result<Vec<notifications::Model>, ApiError> {
-    let now = OffsetDateTime::now_utc();
-    let mut created = Vec::with_capacity(recipients.len());
-    for (user_id, kind) in recipients {
-        let model = notifications::ActiveModel {
-            id: Set(Uuid::new_v4()),
-            user_id: Set(*user_id),
-            kind: Set((*kind).to_owned()),
-            conversation_id: Set(Some(conversation_id)),
-            message_id: Set(Some(message_id)),
-            event_id: Set(None),
-            occurrence_start: Set(None),
-            payload: Set(None),
-            actor_id: Set(Some(actor_id)),
-            created_at: Set(now),
-            read_at: Set(None),
-            email_handled_at: Set(None),
+        if !CATEGORIES.contains(&self.category.as_str()) {
+            return Err("category");
         }
-        .insert(txn)
-        .await?;
-        created.push(model);
+        if self.object.is_empty() || self.object.len() > 200 {
+            return Err("object");
+        }
+        if !self.link.starts_with("https://") || self.link.len() > 2000 {
+            return Err("link");
+        }
+        if serde_json::to_vec(&self.variables).map_or(true, |v| v.len() > MAX_VARIABLES_BYTES) {
+            return Err("variables");
+        }
+        let mut recipients = self.recipients.clone();
+        recipients.sort_unstable();
+        recipients.dedup();
+        if recipients.is_empty() || recipients.len() > MAX_RECIPIENTS {
+            return Err("recipients");
+        }
+        Ok(recipients)
     }
-    Ok(created)
 }
 
-/// One notification row about a message, outside the sending transaction. `never_mailed` marks a
-/// kind the email fallback never sends (a reaction, an edit): it is filed as already handled there.
-#[allow(clippy::too_many_arguments)]
-async fn insert_about_message<C: ConnectionTrait>(
-    db: &C,
-    user_id: Uuid,
-    kind: &str,
-    conversation_id: Uuid,
-    message_id: Uuid,
-    actor_id: Uuid,
-    payload: Option<serde_json::Value>,
-    never_mailed: bool,
-) -> Result<notifications::Model, ApiError> {
-    let now = OffsetDateTime::now_utc();
-    Ok(notifications::ActiveModel {
-        id: Set(Uuid::new_v4()),
-        user_id: Set(user_id),
-        kind: Set(kind.to_owned()),
-        conversation_id: Set(Some(conversation_id)),
-        message_id: Set(Some(message_id)),
-        event_id: Set(None),
-        occurrence_start: Set(None),
-        payload: Set(payload),
-        actor_id: Set(Some(actor_id)),
-        created_at: Set(now),
-        read_at: Set(None),
-        email_handled_at: Set(never_mailed.then_some(now)),
-    }
-    .insert(db)
-    .await?)
-}
-
-/// Whether `user_id` wants a `kind` about this conversation in the app and on their phone.
-async fn wanted_in_app(
-    state: &AppState,
-    user_id: Uuid,
-    kind: &str,
-    conversation_id: Uuid,
-) -> Result<bool, ApiError> {
-    let user_prefs = prefs::load(&state.db, user_id).await?;
-    let scopes = prefs::scopes(&state.db, user_id, &[conversation_id]).await?;
-    Ok(prefs::allows(
-        kind,
-        &user_prefs,
-        scopes.get(&conversation_id),
-        prefs::Delivery::App,
+/// Publish entries to the inbox.
+#[utoipa::path(
+    post,
+    path = "/api/v1/inbox",
+    tag = "inbox",
+    request_body = Publication,
+    responses(
+        (status = 202, description = "Stored, one entry per recipient", body = Published),
+        (status = 400, description = "Refused (`reason`: `kind`, `kind_not_yours`, `category`, `object`, `link`, `variables`, `recipients`)"),
+        (status = 401, description = "No valid token"),
+        (status = 403, description = "Not a product with `hub:publish`")
+    )
+)]
+pub async fn publish(
+    State(state): State<AppState>,
+    publisher: Publisher,
+    Json(publication): Json<Publication>,
+) -> Result<(StatusCode, Json<Published>), Problem> {
+    let recipients = publication.check(&publisher.client_id).map_err(refuse)?;
+    let variables = Value::Object(publication.variables.clone());
+    let ids: Vec<Uuid> = recipients.iter().map(|_| Uuid::new_v4()).collect();
+    // One statement for every recipient: a publication is stored whole or not at all.
+    state
+        .db
+        .execute_raw(Statement::from_sql_and_values(
+            DbBackend::Postgres,
+            "INSERT INTO inbox_entries (id, account_id, product, kind, category, organisation_id, actor_id, \
+             object_id, link, variables) \
+             SELECT id, account_id, $3, $4, $5, $6, $7, $8, $9, $10 FROM unnest($1::uuid[], $2::uuid[]) AS r(id, account_id)",
+            [
+                ids.into(),
+                recipients.clone().into(),
+                publisher.client_id.into(),
+                publication.kind.into(),
+                publication.category.into(),
+                publication.organisation.into(),
+                publication.actor.into(),
+                publication.object.into(),
+                publication.link.into(),
+                variables.into(),
+            ],
+        ))
+        .await
+        .map_err(internal)?;
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(Published {
+            entries: recipients.len(),
+        }),
     ))
 }
 
-/// Push fresh rows to their phones and browsers, then to each recipient's open sessions.
-async fn deliver(state: &AppState, rows: Vec<notifications::Model>) -> Result<(), ApiError> {
-    if rows.is_empty() {
-        return Ok(());
-    }
-    crate::notify::push::dispatch(state, &rows);
-    let targets: Vec<Uuid> = rows.iter().map(|row| row.user_id).collect();
-    let dtos = hydrate(&state.db, rows).await?;
-    for (user_id, dto) in targets.into_iter().zip(dtos) {
-        state
-            .hub
-            .publish(vec![user_id], RealtimeEnvelope::notification_created(dto))
-            .await;
-    }
-    Ok(())
+/// One entry, as its reader sees it.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct Entry {
+    pub id: Uuid,
+    pub product: String,
+    pub kind: String,
+    pub category: String,
+    pub organisation: Option<Uuid>,
+    pub actor: Option<Uuid>,
+    pub object: String,
+    pub link: String,
+    #[schema(value_type = Object)]
+    pub variables: Value,
+    /// RFC 3339.
+    pub created_at: String,
+    /// RFC 3339, when read.
+    pub read_at: Option<String>,
 }
 
-/// Someone reacted to a message: its author hears of it, once per person and message (reacting
-/// again, or with another emoji, says nothing new), unless they reacted to their own message, or
-/// turned reactions off (or the conversation down).
-pub async fn notify_reaction(
-    state: &AppState,
-    message: &messages::Model,
-    actor_id: Uuid,
-    emoji: &str,
-) -> Result<(), ApiError> {
-    let Some(author_id) = message.author_id else {
-        return Ok(());
-    };
-    if author_id == actor_id || message.deleted_at.is_some() {
-        return Ok(());
-    }
-    let conversation_id = message.conversation_id;
-    // The author may have left the conversation since.
-    if super::authz::ensure_conversation_access(&state.db, conversation_id, author_id)
-        .await
-        .is_err()
-    {
-        return Ok(());
-    }
-    let already = notifications::Entity::find()
-        .filter(notifications::Column::UserId.eq(author_id))
-        .filter(notifications::Column::Kind.eq("reaction"))
-        .filter(notifications::Column::MessageId.eq(message.id))
-        .filter(notifications::Column::ActorId.eq(actor_id))
-        .one(&state.db)
-        .await?;
-    if already.is_some() || !wanted_in_app(state, author_id, "reaction", conversation_id).await? {
-        return Ok(());
-    }
-    let row = insert_about_message(
-        &state.db,
-        author_id,
-        "reaction",
-        conversation_id,
-        message.id,
-        actor_id,
-        Some(serde_json::json!({ "emoji": emoji })),
-        true,
-    )
-    .await?;
-    deliver(state, vec![row]).await
+fn rfc3339(at: OffsetDateTime) -> String {
+    at.format(&Rfc3339).unwrap_or_default()
 }
 
-/// A message was edited: everyone it notified hears that it changed (`edited`), and anyone the new
-/// text addresses for the first time (a new mention) is notified as a new message would notify
-/// them. `addressed` is who the edited message would notify if it were sent now, by kind. Someone
-/// whose notification about it is still unread is left alone: they will read the new text anyway.
-pub async fn notify_edit(
-    state: &AppState,
-    message: &messages::Model,
-    author_id: Uuid,
-    addressed: &[(Uuid, &'static str)],
-) -> Result<(), ApiError> {
-    let earlier = notifications::Entity::find()
-        .filter(notifications::Column::MessageId.eq(message.id))
-        .all(&state.db)
-        .await?;
-    let told: HashSet<Uuid> = earlier.iter().map(|row| row.user_id).collect();
-    let unread: HashSet<Uuid> = earlier
-        .iter()
-        .filter(|row| row.read_at.is_none())
-        .map(|row| row.user_id)
-        .collect();
-
-    let mut wanted: Vec<(Uuid, &'static str)> = Vec::new();
-    for (user_id, kind) in addressed {
-        if told.contains(user_id) {
-            wanted.push((*user_id, "edited"));
-        } else {
-            wanted.push((*user_id, kind));
-        }
-    }
-    let mut was_told: Vec<Uuid> = told
-        .iter()
-        .copied()
-        .filter(|user_id| !addressed.iter().any(|(u, _)| u == user_id))
-        .collect();
-    was_told.sort();
-    wanted.extend(was_told.into_iter().map(|user_id| (user_id, "edited")));
-
-    let mut rows = Vec::new();
-    let mut seen = HashSet::new();
-    for (user_id, kind) in wanted {
-        if user_id == author_id || unread.contains(&user_id) || !seen.insert(user_id) {
-            continue;
-        }
-        let edited = kind == "edited";
-        if edited && !wanted_in_app(state, user_id, kind, message.conversation_id).await? {
-            continue;
-        }
-        rows.push(
-            insert_about_message(
-                &state.db,
-                user_id,
-                kind,
-                message.conversation_id,
-                message.id,
-                author_id,
-                None,
-                edited,
-            )
-            .await?,
-        );
-    }
-    deliver(state, rows).await
-}
-
-/// A short single-line plain-text excerpt of a message body.
-fn preview(body: &str) -> String {
-    let flat = body.replace('\n', " ");
-    let trimmed = flat.trim();
-    if trimmed.chars().count() <= PREVIEW_CHARS {
-        return trimmed.to_owned();
-    }
-    let cut: String = trimmed.chars().take(PREVIEW_CHARS).collect();
-    format!("{}\u{2026}", cut.trim_end())
-}
-
-/// Turn notification rows into DTOs, batch-loading each source message (for the preview) and actor
-/// (for the display name) so a page costs a fixed handful of queries.
-pub async fn hydrate<C: ConnectionTrait>(
-    db: &C,
-    rows: Vec<notifications::Model>,
-) -> Result<Vec<NotificationDto>, ApiError> {
-    // Calendar reminders and invitations are drawn by the calendar, which knows their events; the
-    // rest are about a message. Both come back in the order they were asked for.
-    let order: Vec<Uuid> = rows.iter().map(|r| r.id).collect();
-    let (reminder_rows, rows): (Vec<_>, Vec<_>) = rows
-        .into_iter()
-        .partition(|r| r.kind == "calendar_reminder");
-    let (invitation_rows, rows): (Vec<_>, Vec<_>) = rows
-        .into_iter()
-        .partition(|r| crate::notify::prefs::is_invitation_kind(&r.kind));
-    let (shared_rows, rows): (Vec<_>, Vec<_>) =
-        rows.into_iter().partition(|r| r.kind == "calendar_shared");
-    let (guest_rows, rows): (Vec<_>, Vec<_>) = rows
-        .into_iter()
-        .partition(|r| crate::permissions::guest_expiry::is_guest_notice(&r.kind));
-    let mut drawn = crate::calendar::reminders::hydrate(db, reminder_rows)
-        .await
-        .map_err(|_| ApiError::Internal)?;
-    drawn.extend(
-        crate::calendar::invitations::hydrate(db, invitation_rows)
-            .await
-            .map_err(|_| ApiError::Internal)?,
-    );
-    drawn.extend(
-        crate::calendar::shares::hydrate(db, shared_rows)
-            .await
-            .map_err(|_| ApiError::Internal)?,
-    );
-    drawn.extend(
-        crate::permissions::guest_expiry::hydrate(db, guest_rows)
-            .await
-            .map_err(|_| ApiError::Internal)?,
-    );
-    let rows: Vec<(notifications::Model, Uuid, Uuid)> = rows
-        .into_iter()
-        .filter_map(|r| {
-            let (conversation_id, message_id) = (r.conversation_id?, r.message_id?);
-            Some((r, conversation_id, message_id))
+impl Entry {
+    fn from_row(row: &QueryResult) -> Result<Self, DbErr> {
+        let created_at: OffsetDateTime = row.try_get("", "created_at")?;
+        let read_at: Option<OffsetDateTime> = row.try_get("", "read_at")?;
+        Ok(Self {
+            id: row.try_get("", "id")?,
+            product: row.try_get("", "product")?,
+            kind: row.try_get("", "kind")?,
+            category: row.try_get("", "category")?,
+            organisation: row.try_get("", "organisation_id")?,
+            actor: row.try_get("", "actor_id")?,
+            object: row.try_get("", "object_id")?,
+            link: row.try_get("", "link")?,
+            variables: row.try_get("", "variables")?,
+            created_at: rfc3339(created_at),
+            read_at: read_at.map(rfc3339),
         })
-        .collect();
-    if rows.is_empty() {
-        return Ok(in_order(drawn, &order));
     }
-
-    let message_ids: Vec<Uuid> = rows.iter().map(|(_, _, m)| *m).collect();
-    let bodies: HashMap<Uuid, String> = messages::Entity::find()
-        .filter(messages::Column::Id.is_in(message_ids))
-        .all(db)
-        .await?
-        .into_iter()
-        .map(|m| (m.id, m.body))
-        .collect();
-
-    // The space each notification happened in, read from its conversation: the client shows the
-    // inbox for the space on screen, and a notification whose space it cannot determine would be
-    // shown everywhere.
-    // Where each one happened, in words: shared with the saved list, which needs exactly the same
-    // thing for exactly the same reason.
-    let conversation_ids: Vec<Uuid> = rows.iter().map(|(_, c, _)| *c).collect();
-    let labels = super::conversations::label_conversations(db, conversation_ids).await?;
-
-    let actor_ids: Vec<Uuid> = rows.iter().filter_map(|(r, _, _)| r.actor_id).collect();
-    let names: HashMap<Uuid, String> = if actor_ids.is_empty() {
-        HashMap::new()
-    } else {
-        users::Entity::find()
-            .filter(users::Column::Id.is_in(actor_ids))
-            .all(db)
-            .await?
-            .into_iter()
-            .map(|u| (u.id, u.display_name))
-            .collect()
-    };
-
-    drawn.extend(rows.into_iter().map(|(r, conversation_id, message_id)| {
-        NotificationDto {
-            preview: bodies
-                .get(&message_id)
-                .map(|b| preview(b))
-                .unwrap_or_default(),
-            actor_name: r.actor_id.and_then(|id| names.get(&id).cloned()),
-            read: r.read_at.is_some(),
-            created_at: rfc3339(r.created_at),
-            id: r.id,
-            kind: r.kind,
-            space_id: labels.get(&conversation_id).map(|l| l.space_id),
-            channel_name: labels
-                .get(&conversation_id)
-                .and_then(|l| l.channel_name.clone()),
-            space_name: labels
-                .get(&conversation_id)
-                .map(|l| l.space_name.clone())
-                .unwrap_or_default(),
-            conversation_id: Some(conversation_id),
-            message_id: Some(message_id),
-            actor_id: r.actor_id,
-            event_id: None,
-            recurrence_id: None,
-            event_title: None,
-            event_start: None,
-            event_all_day: None,
-            event_location: None,
-            calendar_name: None,
-            event_changes: None,
-            event_my_status: None,
-            ends_at: None,
-            days_left: None,
-            guest_title: None,
-            contact_name: None,
-            emoji: r
-                .payload
-                .as_ref()
-                .and_then(|payload| payload.get("emoji"))
-                .and_then(|emoji| emoji.as_str())
-                .map(str::to_owned),
-        }
-    }));
-    Ok(in_order(drawn, &order))
 }
 
-/// Put drawn notifications back in the order their rows came in.
-fn in_order(mut drawn: Vec<NotificationDto>, order: &[Uuid]) -> Vec<NotificationDto> {
-    let position: HashMap<Uuid, usize> = order.iter().enumerate().map(|(i, id)| (*id, i)).collect();
-    drawn.sort_by_key(|dto| position.get(&dto.id).copied().unwrap_or(usize::MAX));
-    drawn
+/// A page of the inbox.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct Page {
+    pub entries: Vec<Entry>,
+    /// Pass as `before` for the next page; absent on the last.
+    pub next_before: Option<Uuid>,
+    /// What is unread in the whole inbox (of the organisation, when one was asked).
+    pub unread_count: i64,
 }
 
-/// The guest notices, which only a client that asks for them sees, counts or clears.
-const GUEST_KINDS: [&str; 2] = [
-    crate::permissions::guest_expiry::KIND_SOON,
-    crate::permissions::guest_expiry::KIND_ENDING,
-];
-
-/// Query for the notification feed.
-#[derive(Debug, Deserialize)]
+/// What part of the inbox to read.
+#[derive(Debug, Deserialize, IntoParams)]
 pub struct FeedQuery {
-    /// When true, only unread notifications are returned.
+    /// Only what is unread.
     #[serde(default)]
     pub unread: bool,
+    /// Page size, at most 100.
     pub limit: Option<u64>,
-    /// Return notifications older than this one (keyset pagination).
+    /// Entries older than this one (keyset pagination).
     pub before: Option<Uuid>,
-    /// Also return the guest notices (`guest_expiry_soon`, `guest_access_ending`). An app that
-    /// does not know them does not ask, and neither sees them nor has them counted as unread.
-    #[serde(default)]
-    pub guest_notices: bool,
+    /// Only this organisation's entries.
+    pub organisation: Option<Uuid>,
 }
 
-/// Query for marking everything read.
-#[derive(Debug, Deserialize)]
-pub struct ReadAllQuery {
-    /// Also mark the guest notices read: only a client that shows them asks.
-    #[serde(default)]
-    pub guest_notices: bool,
-}
-
-/// `GET /api/v1/notifications`: the caller's notifications, newest first, with the unread count.
+/// The person's inbox, newest first, with what is unread.
 #[utoipa::path(
     get,
-    path = "/api/v1/notifications",
-    tag = "messaging",
-    params(
-        ("unread" = Option<bool>, Query, description = "Only unread notifications"),
-        ("limit" = Option<u64>, Query, description = "Page size (max 100)"),
-        ("before" = Option<Uuid>, Query, description = "Return notifications older than this id"),
-        ("guest_notices" = Option<bool>, Query, description = "Also return the guest access notices")
-    ),
-    responses((status = 200, description = "Notification feed", body = NotificationPage))
-)]
-pub async fn list_notifications(
-    State(state): State<AppState>,
-    session: AuthSession,
-    Query(query): Query<FeedQuery>,
-) -> Result<Json<NotificationPage>, ApiError> {
-    let limit = query.limit.unwrap_or(DEFAULT_LIMIT).min(MAX_LIMIT);
-
-    let mut select =
-        notifications::Entity::find().filter(notifications::Column::UserId.eq(session.user_id));
-    // A client that was not told about the guest notices is not shown them, nor counts them.
-    let known = |select: sea_orm::Select<notifications::Entity>| {
-        if query.guest_notices {
-            select
-        } else {
-            select.filter(notifications::Column::Kind.is_not_in(GUEST_KINDS))
-        }
-    };
-    select = known(select);
-    if query.unread {
-        select = select.filter(notifications::Column::ReadAt.is_null());
-    }
-    if let Some(before) = query.before {
-        // Resolve the cursor to its timestamp, but only if it is the caller's own row.
-        if let Some(cursor) = notifications::Entity::find_by_id(before)
-            .one(&state.db)
-            .await?
-        {
-            if cursor.user_id == session.user_id {
-                select = select.filter(notifications::Column::CreatedAt.lt(cursor.created_at));
-            }
-        }
-    }
-
-    let rows = select
-        .order_by_desc(notifications::Column::CreatedAt)
-        .order_by_desc(notifications::Column::Id)
-        .limit(limit)
-        .all(&state.db)
-        .await?;
-
-    let next_before = if rows.len() as u64 == limit {
-        rows.last().map(|r| r.id)
-    } else {
-        None
-    };
-
-    let unread_count = known(
-        notifications::Entity::find().filter(notifications::Column::UserId.eq(session.user_id)),
+    path = "/api/v1/me/inbox",
+    tag = "inbox",
+    params(FeedQuery),
+    responses(
+        (status = 200, description = "A page of the inbox", body = Page),
+        (status = 401, description = "No valid token"),
+        (status = 403, description = "Not a person's token")
     )
-    .filter(notifications::Column::ReadAt.is_null())
-    .count(&state.db)
-    .await? as i64;
-
-    let notifications = hydrate(&state.db, rows).await?;
-    Ok(Json(NotificationPage {
-        notifications,
+)]
+pub async fn read(
+    State(state): State<AppState>,
+    person: Person,
+    Query(query): Query<FeedQuery>,
+) -> Result<Json<Page>, Problem> {
+    let limit = query.limit.unwrap_or(DEFAULT_LIMIT).clamp(1, MAX_LIMIT);
+    // The cursor resolves only among the reader's own entries.
+    let rows = state
+        .db
+        .query_all_raw(Statement::from_sql_and_values(
+            DbBackend::Postgres,
+            "SELECT e.* FROM inbox_entries e \
+             LEFT JOIN inbox_entries c ON c.id = $2 AND c.account_id = $1 \
+             WHERE e.account_id = $1 \
+               AND ($3::boolean = false OR e.read_at IS NULL) \
+               AND ($4::uuid IS NULL OR e.organisation_id = $4) \
+               AND (c.id IS NULL OR (e.created_at, e.id) < (c.created_at, c.id)) \
+             ORDER BY e.created_at DESC, e.id DESC LIMIT $5",
+            [
+                person.account.into(),
+                query.before.into(),
+                query.unread.into(),
+                query.organisation.into(),
+                i64::try_from(limit).unwrap_or(30).into(),
+            ],
+        ))
+        .await
+        .map_err(internal)?;
+    let entries = rows
+        .iter()
+        .map(Entry::from_row)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(internal)?;
+    let next_before = (entries.len() as u64 == limit)
+        .then(|| entries.last().map(|e| e.id))
+        .flatten();
+    let unread_count = unread(&state, person.account, query.organisation).await?;
+    Ok(Json(Page {
+        entries,
         next_before,
         unread_count,
     }))
 }
 
-/// `PUT /api/v1/notifications/{id}/read`: mark one notification read. Idempotent.
+async fn unread(
+    state: &AppState,
+    account: Uuid,
+    organisation: Option<Uuid>,
+) -> Result<i64, Problem> {
+    let row = state
+        .db
+        .query_one_raw(Statement::from_sql_and_values(
+            DbBackend::Postgres,
+            "SELECT count(*) AS n FROM inbox_entries WHERE account_id = $1 AND read_at IS NULL \
+             AND ($2::uuid IS NULL OR organisation_id = $2)",
+            [account.into(), organisation.into()],
+        ))
+        .await
+        .map_err(internal)?;
+    row.map(|r| r.try_get::<i64>("", "n"))
+        .transpose()
+        .map_err(internal)
+        .map(|n| n.unwrap_or(0))
+}
+
+/// Mark one entry read. Idempotent; another person's entry is not found.
 #[utoipa::path(
-    put,
-    path = "/api/v1/notifications/{id}/read",
-    tag = "messaging",
-    params(
-        ("id" = Uuid, Path, description = "Notification id"),
-        ("guest_notices" = Option<bool>, Query, description = "Count the guest access notices in the announced unread count")
-    ),
+    post,
+    path = "/api/v1/me/inbox/{id}/read",
+    tag = "inbox",
+    params(("id" = Uuid, Path, description = "The entry")),
     responses(
-        (status = 204, description = "Marked read"),
-        (status = 404, description = "No such notification for the caller")
+        (status = 204, description = "Read"),
+        (status = 404, description = "No such entry of the reader's")
     )
 )]
 pub async fn mark_read(
     State(state): State<AppState>,
-    session: AuthSession,
+    person: Person,
     Path(id): Path<Uuid>,
-    Query(query): Query<ReadAllQuery>,
-) -> Result<StatusCode, ApiError> {
-    let row = notifications::Entity::find_by_id(id)
-        .one(&state.db)
-        .await?
-        .ok_or(ApiError::NotFound)?;
-    // Only ever the caller's own notifications; do not reveal others exist.
-    if row.user_id != session.user_id {
-        return Err(ApiError::NotFound);
-    }
-    if row.read_at.is_none() {
-        let mut active = row.into_active_model();
-        active.read_at = Set(Some(OffsetDateTime::now_utc()));
-        active.update(&state.db).await?;
-        announce_read(
-            &state,
-            session.user_id,
-            vec![id],
-            false,
-            query.guest_notices,
-        )
-        .await;
+) -> Result<StatusCode, Problem> {
+    let found = state
+        .db
+        .query_one_raw(Statement::from_sql_and_values(
+            DbBackend::Postgres,
+            "UPDATE inbox_entries SET read_at = COALESCE(read_at, now()) WHERE id = $1 AND account_id = $2 RETURNING id",
+            [id.into(), person.account.into()],
+        ))
+        .await
+        .map_err(internal)?;
+    if found.is_none() {
+        return Err(Problem::not_found());
     }
     Ok(StatusCode::NO_CONTENT)
 }
 
-/// `PUT /api/v1/notifications/read`: mark all of the caller's notifications read. Idempotent.
+/// Which entries to mark read at once.
+#[derive(Debug, Deserialize, IntoParams)]
+pub struct ReadAllQuery {
+    /// Only this organisation's.
+    pub organisation: Option<Uuid>,
+}
+
+/// Mark every entry read (of one organisation, when asked). Idempotent.
 #[utoipa::path(
-    put,
-    path = "/api/v1/notifications/read",
-    tag = "messaging",
-    params(("guest_notices" = Option<bool>, Query, description = "Also mark the guest access notices read")),
-    responses((status = 204, description = "All marked read"))
+    post,
+    path = "/api/v1/me/inbox/read",
+    tag = "inbox",
+    params(ReadAllQuery),
+    responses((status = 204, description = "All read"))
 )]
 pub async fn mark_all_read(
     State(state): State<AppState>,
-    session: AuthSession,
+    person: Person,
     Query(query): Query<ReadAllQuery>,
-) -> Result<StatusCode, ApiError> {
-    let mut update = notifications::Entity::update_many()
-        .col_expr(
-            notifications::Column::ReadAt,
-            Expr::value(OffsetDateTime::now_utc()),
-        )
-        .filter(notifications::Column::UserId.eq(session.user_id))
-        .filter(notifications::Column::ReadAt.is_null());
-    // A client that cannot see the guest notices does not clear them.
-    if !query.guest_notices {
-        update = update.filter(notifications::Column::Kind.is_not_in(GUEST_KINDS));
-    }
-    let marked = update.exec(&state.db).await?;
-    if marked.rows_affected > 0 {
-        announce_read(
-            &state,
-            session.user_id,
-            Vec::new(),
-            true,
-            query.guest_notices,
-        )
-        .await;
-    }
+) -> Result<StatusCode, Problem> {
+    state
+        .db
+        .execute_raw(Statement::from_sql_and_values(
+            DbBackend::Postgres,
+            "UPDATE inbox_entries SET read_at = now() WHERE account_id = $1 AND read_at IS NULL \
+             AND ($2::uuid IS NULL OR organisation_id = $2)",
+            [person.account.into(), query.organisation.into()],
+        ))
+        .await
+        .map_err(internal)?;
     Ok(StatusCode::NO_CONTENT)
 }
 
-/// What the `notification.read` event says.
-#[derive(Debug, serde::Serialize)]
-struct ReadPayload {
-    /// The notifications read; empty when `all` is set.
-    ids: Vec<Uuid>,
-    /// Every notification of the person was read.
-    all: bool,
-    /// What is left unread, as the bell and the icon count it.
-    unread_count: i64,
-}
-
-/// Something was read: tell every device the person has open (`notification.read`), and their
-/// phones, silently, so the icon's count and the notifications on screen follow even with the app
-/// closed (ADR 0006, the sync push). Called only when something actually changed, after it was
-/// saved: it never fails the request, which has done what it was asked.
-///
-/// `guest_notices` is the reader's own: a client that asked for the guest notices has them counted,
-/// exactly as its feed counts them; any other is announced the count without them, since a badge an
-/// older app could never clear would be worse than a notice that waits for the next fetch.
-async fn announce_read(
-    state: &AppState,
-    user_id: Uuid,
-    ids: Vec<Uuid>,
-    all: bool,
-    guest_notices: bool,
-) {
-    let mut unread = notifications::Entity::find()
-        .filter(notifications::Column::UserId.eq(user_id))
-        .filter(notifications::Column::ReadAt.is_null());
-    if !guest_notices {
-        unread = unread.filter(notifications::Column::Kind.is_not_in(GUEST_KINDS));
-    }
-    let unread_count = match unread.count(&state.db).await {
-        Ok(count) => count as i64,
-        Err(error) => {
-            tracing::warn!(%error, "could not count the unread notifications to announce a read");
-            return;
-        }
-    };
-    state
-        .hub
-        .publish(
-            vec![user_id],
-            RealtimeEnvelope::notification_read(ReadPayload {
-                ids,
-                all,
-                unread_count,
-            }),
-        )
-        .await;
-    crate::notify::phone::sync_soon(state, user_id).await;
+/// The inbox's routes.
+pub fn router() -> Router<AppState> {
+    Router::new()
+        .route("/api/v1/inbox", post(publish))
+        .route("/api/v1/me/inbox", get(read))
+        .route("/api/v1/me/inbox/read", post(mark_all_read))
+        .route("/api/v1/me/inbox/{id}/read", post(mark_read))
 }
 
 #[cfg(test)]
 mod tests {
-    use super::compute_recipients;
-    use uuid::Uuid;
+    use super::*;
 
-    fn kind_for(recipients: &[(Uuid, &'static str)], user: Uuid) -> Option<&'static str> {
-        recipients
-            .iter()
-            .find(|(id, _)| *id == user)
-            .map(|(_, kind)| *kind)
+    fn publication() -> Publication {
+        Publication {
+            kind: "chat.mention".into(),
+            category: "mention".into(),
+            organisation: None,
+            actor: None,
+            object: "m1".into(),
+            link: "https://chat.example.org/c/1".into(),
+            variables: serde_json::Map::new(),
+            recipients: vec![Uuid::nil(), Uuid::nil()],
+        }
     }
 
     #[test]
-    fn being_named_outranks_being_in_the_room() {
-        let author = Uuid::new_v4();
-        let reader = Uuid::new_v4();
-        // `@here` expands to every member, so the same person is very often in both lists. They get
-        // one notification, and it is the stronger one.
-        let recipients = compute_recipients(author, &[reader], &[reader], &[], None);
-        assert_eq!(recipients.len(), 1);
-        assert_eq!(kind_for(&recipients, reader), Some("mention"));
-    }
-
-    #[test]
-    fn a_broadcast_outranks_a_reply_and_a_direct_message() {
-        let author = Uuid::new_v4();
-        let reader = Uuid::new_v4();
-        let recipients = compute_recipients(author, &[], &[reader], &[reader], Some(reader));
-        assert_eq!(kind_for(&recipients, reader), Some("broadcast"));
-    }
-
-    #[test]
-    fn a_broadcast_is_not_reported_as_a_mention() {
-        // The distinction the reader's preference rests on: someone who has turned off `@canal`
-        // can only be obeyed if these two never arrive under the same name.
-        let author = Uuid::new_v4();
-        let reader = Uuid::new_v4();
-        let recipients = compute_recipients(author, &[], &[reader], &[], None);
-        assert_eq!(kind_for(&recipients, reader), Some("broadcast"));
-    }
-
-    #[test]
-    fn the_author_is_never_notified_of_their_own_message() {
-        let author = Uuid::new_v4();
-        let recipients = compute_recipients(author, &[author], &[author], &[author], Some(author));
-        assert!(recipients.is_empty());
+    fn a_product_publishes_under_its_own_name() {
+        assert_eq!(
+            publication().check("chat").unwrap(),
+            vec![Uuid::nil()],
+            "repeats go"
+        );
+        assert!(publication().check("drive").is_err());
+        let refused = |change: fn(&mut Publication)| {
+            let mut p = publication();
+            change(&mut p);
+            p.check("chat").is_err()
+        };
+        assert!(refused(|p| p.kind = "chat".into()));
+        assert!(refused(|p| p.kind = "chat.Mention".into()));
+        assert!(refused(|p| p.category = "urgent".into()));
+        assert!(refused(|p| p.link = "http://chat.example.org".into()));
+        assert!(refused(|p| p.object = String::new()));
+        assert!(refused(|p| p.recipients.clear()));
+        assert!(refused(|p| {
+            p.variables
+                .insert("excerpt".into(), "x".repeat(MAX_VARIABLES_BYTES).into());
+        }));
     }
 }
