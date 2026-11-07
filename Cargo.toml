@@ -9,7 +9,7 @@ repository = "https://github.com/Ruchoir/hub"
 publish = false
 
 [workspace]
-members = ["migration"]
+members = ["migration", "relay"]
 
 # The service is a library (everything runs from `hub::run`, and the tests build the router from
 # `hub::app`) and a thin binary.

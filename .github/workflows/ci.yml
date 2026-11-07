@@ -68,3 +68,13 @@ jobs:
       - name: Show the logs
         if: always()
         run: docker logs hub || true
+
+  relay-image:
+    name: Relay image
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v7.0.1
+
+      - name: Build the push relay's image
+        run: docker build --file relay/Dockerfile --tag ruchoir-push-relay:ci .
