@@ -271,6 +271,24 @@
           "cache"
         ],
         "type": "object"
+      },
+      "Ticket": {
+        "description": "A new ticket.",
+        "properties": {
+          "expires_in": {
+            "description": "Seconds it waits.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "ticket": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "ticket",
+          "expires_in"
+        ],
+        "type": "object"
       }
     }
   },
@@ -302,6 +320,34 @@
         "summary": "What this service is and what it can do.",
         "tags": [
           "product"
+        ]
+      }
+    },
+    "/api/v1/backchannel-logout": {
+      "post": {
+        "operationId": "backchannel_logout",
+        "requestBody": {
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "type": "string"
+              }
+            }
+          },
+          "description": "`logout_token`",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Done"
+          },
+          "400": {
+            "description": "No logout token, or one that does not hold"
+          }
+        },
+        "summary": "Propolis's back-channel logout (OpenID Connect Back-Channel Logout 1.0): a session ended, so the\nsockets it opened close, on every process; with no `sid`, every socket of the person.",
+        "tags": [
+          "live"
         ]
       }
     },
@@ -363,6 +409,135 @@
         "summary": "Publish entries to the inbox.",
         "tags": [
           "inbox"
+        ]
+      }
+    },
+    "/api/v1/live/publish": {
+      "post": {
+        "operationId": "publish",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          },
+          "description": "A `Publication` of ruchoir-events: `audience` and `frame`",
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Handed to every process"
+          },
+          "400": {
+            "description": "Refused (`reason`: `frame_type_not_yours`, `audience`)"
+          },
+          "401": {
+            "description": "No valid token"
+          },
+          "403": {
+            "description": "Not a product with `hub:publish`"
+          }
+        },
+        "summary": "Push a frame to the audience a product computed.",
+        "tags": [
+          "live"
+        ]
+      }
+    },
+    "/api/v1/live/sse": {
+      "get": {
+        "operationId": "open",
+        "parameters": [
+          {
+            "description": "A page's single-use ticket.",
+            "in": "query",
+            "name": "ticket",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A stream of frames"
+          },
+          "401": {
+            "description": "No ticket or token, or not a valid one"
+          },
+          "403": {
+            "description": "A page origin the instance does not serve"
+          }
+        },
+        "summary": "Open the stream.",
+        "tags": [
+          "live"
+        ]
+      }
+    },
+    "/api/v1/live/tickets": {
+      "post": {
+        "operationId": "issue",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Ticket"
+                }
+              }
+            },
+            "description": "A single-use ticket, a minute long"
+          },
+          "401": {
+            "description": "No valid token"
+          },
+          "403": {
+            "description": "Not a token a product exchanged for a person"
+          }
+        },
+        "summary": "Get a page's product a ticket for the person it acts for.",
+        "tags": [
+          "live"
+        ]
+      }
+    },
+    "/api/v1/live/ws": {
+      "get": {
+        "operationId": "open",
+        "parameters": [
+          {
+            "description": "A page's single-use ticket.",
+            "in": "query",
+            "name": "ticket",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "101": {
+            "description": "Switching to WebSocket"
+          },
+          "401": {
+            "description": "No ticket or token, or not a valid one"
+          },
+          "403": {
+            "description": "A page origin the instance does not serve"
+          }
+        },
+        "summary": "Open the socket.",
+        "tags": [
+          "live"
         ]
       }
     },
@@ -536,6 +711,10 @@
     {
       "description": "What a person was told about, published by the products",
       "name": "inbox"
+    },
+    {
+      "description": "Frames pushed live to the pages and apps a person has open",
+      "name": "live"
     }
   ]
 }

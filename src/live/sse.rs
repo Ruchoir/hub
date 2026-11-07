@@ -1,139 +1,90 @@
-//! The Server-Sent Events fallback transport.
-//!
-//! Where a WebSocket is blocked (some corporate proxies), a client falls back to SSE: a one-way,
-//! read-only stream of the same [`RealtimeEnvelope`] frames. Because SSE cannot carry client-to-
-//! server frames, typing on this transport is a separate `POST /realtime/typing`, and presence is
-//! kept alive by a server-side timer for the life of the stream rather than by client pings.
-//!
-//! Cleanup is tied to the stream's lifetime: a guard captured by the response runs on drop when the
-//! HTTP connection ends, deregistering the connection and, if it was the user's last, clearing their
-//! presence heartbeat.
+//! The server-sent event stream: the same frames as the WebSocket, for a client that cannot hold
+//! one (a proxy that drops upgrades). Opened the same way ([`super::opener`]).
 
 use std::convert::Infallible;
 use std::time::Duration;
 
-use axum::extract::State;
-use axum::http::StatusCode;
+use axum::extract::{Query, State};
+use axum::http::HeaderMap;
 use axum::response::sse::{Event, KeepAlive, Sse};
-use axum::Json;
+use axum::response::{IntoResponse, Response};
 use futures_util::StreamExt;
 use tokio::task::JoinHandle;
 use tokio_stream::wrappers::ReceiverStream;
 use uuid::Uuid;
 
-use crate::auth::extract::AuthSession;
-use crate::messaging::dto::TypingRequest;
-use crate::state::AppState;
+use super::fanout::ConnId;
+use super::opener::{opener, OpenQuery};
+use super::presence;
+use super::ws::{left, HEARTBEAT_SECS};
+use crate::AppState;
 
-use super::event::RealtimeEnvelope;
-use super::{presence, typing};
-
-/// Runs connection cleanup when the SSE response is dropped (the client disconnected).
-struct ConnGuard {
+/// Forgets the connection when the client goes and the response is dropped.
+struct Guard {
     state: AppState,
-    user_id: Uuid,
-    conn_id: u64,
+    account: Uuid,
+    id: ConnId,
     heartbeat: JoinHandle<()>,
 }
 
-impl Drop for ConnGuard {
+impl Drop for Guard {
     fn drop(&mut self) {
         self.heartbeat.abort();
-        let state = self.state.clone();
-        let user_id = self.user_id;
-        let conn_id = self.conn_id;
-        // Drop cannot be async: hand the teardown to a task.
-        tokio::spawn(async move {
-            let was_last = state.hub.unregister(user_id, conn_id);
-            if was_last && !state.hub.is_locally_connected(user_id) {
-                presence::clear(state.hub.valkey(), user_id).await;
-                presence::refresh_and_broadcast(&state, user_id).await;
-            }
-        });
+        let (state, account, id) = (self.state.clone(), self.account, self.id);
+        // `Drop` cannot wait: the cleanup is a task.
+        tokio::spawn(async move { left(&state, account, id).await });
     }
 }
 
-/// `GET /api/v1/realtime/sse`: subscribe to the caller's real-time event stream.
+/// Open the stream.
 #[utoipa::path(
     get,
-    path = "/api/v1/realtime/sse",
-    tag = "realtime",
+    path = "/api/v1/live/sse",
+    tag = "live",
+    params(OpenQuery),
     responses(
-        (status = 200, description = "Server-sent event stream of real-time envelopes"),
-        (status = 401, description = "Authentication required")
+        (status = 200, description = "A stream of frames"),
+        (status = 401, description = "No ticket or token, or not a valid one"),
+        (status = 403, description = "A page origin the instance does not serve")
     )
 )]
-pub async fn sse_handler(
+pub async fn open(
     State(state): State<AppState>,
-    session: AuthSession,
-) -> Sse<impl futures_util::Stream<Item = Result<Event, Infallible>>> {
-    let user_id = session.user_id;
-    let (conn_id, rx) = state.hub.register(user_id, &session.session_id);
-
-    presence::heartbeat(state.hub.valkey(), user_id, state.config.presence_ttl_secs).await;
-    presence::refresh_and_broadcast(&state, user_id).await;
-
-    // Refresh presence on a timer for as long as the stream is open.
-    let hb_state = state.clone();
-    let heartbeat_secs = state.config.presence_heartbeat_secs.max(1) as u64;
+    headers: HeaderMap,
+    Query(query): Query<OpenQuery>,
+) -> Response {
+    let opener = match opener(&state, &headers, &query).await {
+        Ok(opener) => opener,
+        Err(refusal) => return refusal.into_response(),
+    };
+    let account = opener.account;
+    let (id, rx) = state.fanout.register(account, opener.sid);
+    presence::heartbeat(state.fanout.valkey(), account).await;
+    let beat_state = state.clone();
     let heartbeat = tokio::spawn(async move {
-        let mut ticker = tokio::time::interval(Duration::from_secs(heartbeat_secs));
+        let mut ticker = tokio::time::interval(Duration::from_secs(HEARTBEAT_SECS));
         ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         loop {
             ticker.tick().await;
-            presence::heartbeat(
-                hb_state.hub.valkey(),
-                user_id,
-                hb_state.config.presence_ttl_secs,
-            )
-            .await;
+            presence::heartbeat(beat_state.fanout.valkey(), account).await;
         }
     });
-
-    let guard = ConnGuard {
-        state: state.clone(),
-        user_id,
-        conn_id,
+    let guard = Guard {
+        state,
+        account,
+        id,
         heartbeat,
     };
-
-    let stream = ReceiverStream::new(rx).map(move |envelope| {
-        // Capture the guard so its `Drop` (cleanup) fires when the client disconnects.
-        let _keep_alive = &guard;
-        Ok(to_event(&envelope))
+    let stream = ReceiverStream::new(rx).map(move |frame| {
+        // The guard lives as long as the stream, so its `Drop` runs when the client goes.
+        let _alive = &guard;
+        let event = Event::default().event(frame.frame_type.clone());
+        Ok::<_, Infallible>(match serde_json::to_string(&frame) {
+            Ok(json) => event.data(json),
+            Err(_) => event.data("{}"),
+        })
     });
-
-    Sse::new(stream).keep_alive(KeepAlive::new().interval(Duration::from_secs(heartbeat_secs)))
-}
-
-/// `POST /api/v1/realtime/typing`: typing signal for SSE-fallback clients (WS clients send it
-/// inline). Best-effort: always `202`, since authorization and throttling are handled internally.
-#[utoipa::path(
-    post,
-    path = "/api/v1/realtime/typing",
-    tag = "realtime",
-    request_body = TypingRequest,
-    responses((status = 202, description = "Typing signal accepted for processing"))
-)]
-pub async fn typing_handler(
-    State(state): State<AppState>,
-    session: AuthSession,
-    Json(body): Json<TypingRequest>,
-) -> StatusCode {
-    typing::signal(&state, session.user_id, body.conversation_id).await;
-    StatusCode::ACCEPTED
-}
-
-/// Render an envelope as a named SSE event, falling back to a comment if serialization fails.
-fn to_event(envelope: &RealtimeEnvelope) -> Event {
-    match Event::default()
-        .event(envelope.event_type.clone())
-        .json_data(envelope)
-    {
-        Ok(event) => event,
-        Err(error) => {
-            tracing::error!(%error, "failed to encode SSE event");
-            Event::default().comment("encode error")
-        }
-    }
+    Sse::new(stream)
+        .keep_alive(KeepAlive::new().interval(Duration::from_secs(HEARTBEAT_SECS)))
+        .into_response()
 }

@@ -129,6 +129,10 @@ src/auth.rs          who calls: Propolis's tokens for the hub, Publisher (a prod
                      and Person (a person, for what is theirs)
 src/inbox.rs         the inbox: POST /api/v1/inbox (a product publishes), /api/v1/me/inbox (a person
                      reads and marks), from the monolith's notifications without the chat's logic
+src/live/            live delivery, from the monolith's realtime/: fanout.rs (connections and the Valkey
+                     channel, closing across processes), opener.rs and tickets.rs (who opens a socket:
+                     a page's single-use ticket or an app's token), ws.rs and sse.rs, presence.rs (the
+                     heartbeat), routes.rs (products publish, Propolis's back-channel logout)
 src/openapi.rs       ApiDoc, served at /api/v1/openapi.json; every route registers here
 migration/           the hub-migration crate
 relay/               the push relay (`ruchoir-push-relay`), from the monolith: run by the publisher,
@@ -154,6 +158,8 @@ compose.yaml         PostgreSQL and Valkey for a development machine
 | `HUB_VALKEY_POOL_SIZE` | `6` | The size of the Valkey pool |
 | `HUB_AUTO_MIGRATE` | `true` | Apply pending migrations at start-up; `false` in production, where `hub migrate` applies them |
 | `HUB_ISSUER` | unset: every authenticated call refused | Propolis's issuer (`https://id.<domain>`). The hub accepts its access tokens whose audience is `HUB_PUBLIC_URL` |
+| `HUB_CLIENT_ID` | unset: back-channel logout refused | The hub's client id at Propolis: the audience of the logout tokens that close a session's sockets |
+| `HUB_PAGE_ORIGINS` | none | The origins of the instance's product pages, comma-separated: the only pages that may open a socket (ADR 0016) |
 | `RUST_LOG` | `info` | Log filter |
 
 ### What will live here

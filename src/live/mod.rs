@@ -1,24 +1,23 @@
-//! Real-time transport and presence.
+//! Live delivery: frames pushed to the pages and apps a person has open (design
+//! `docs/design/hub.md`, section 6; ADR 0003 and 0016 of `Ruchoir/.github`).
 //!
-//! This module carries server-to-client push (new messages, reactions, pins, read updates, typing,
-//! presence) over a WebSocket, with a read-only SSE fallback. State-changing operations are *not*
-//! here: they are REST handlers in [`crate::messaging`] that, after committing, call
-//! [`hub::Hub::publish`] to fan the resulting event out. Delivery is brokered through a single
-//! Valkey pub/sub channel so the design scales to several API instances without sticky sessions.
+//! From the monolith's `realtime/`, with the hub's changes: a product publishes a `ClientFrame` for
+//! the audience it computed and the hub forwards it unread; a page opens its socket with a ticket its
+//! product got, an app with its own token; sockets close with their Propolis session, across
+//! processes. Typing stays with the products.
 //!
-//! - [`event`] - the versioned envelope and the fan-out wire type.
-//! - [`hub`] - the local connection registry and the Valkey pub/sub bridge.
-//! - [`presence`] - ephemeral live presence plus the persistent manual override.
-//! - [`typing`] - throttled, ephemeral typing signals.
-//! - [`ws`] / [`sse`] - the two transports.
-//! - [`routes`] - the sub-router.
+//! - [`fanout`]: this process's connections and the Valkey channel between processes.
+//! - [`opener`]: who opens a socket or a stream; [`tickets`]: the pages' single-use tickets.
+//! - [`ws`] and [`sse`]: the two transports.
+//! - [`presence`]: the live heartbeat.
+//! - [`routes`]: publishing, opening, and Propolis's back-channel logout.
 
-pub mod event;
-pub mod hub;
+pub mod fanout;
+pub mod opener;
 pub mod presence;
 pub mod routes;
 pub mod sse;
-pub mod typing;
+pub mod tickets;
 pub mod ws;
 
-pub use hub::Hub;
+pub use fanout::Fanout;

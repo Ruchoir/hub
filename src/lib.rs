@@ -13,6 +13,7 @@ pub mod config;
 pub mod db;
 pub mod health;
 pub mod inbox;
+pub mod live;
 pub mod openapi;
 pub mod product;
 
@@ -48,6 +49,8 @@ pub struct AppState {
     pub valkey: Pool,
     /// Checks Propolis's access tokens for the hub; `None` without `HUB_ISSUER`.
     pub verifier: Option<ruchoir_auth::Verifier>,
+    /// This process's live connections, and the channel to the other processes.
+    pub fanout: Arc<live::Fanout>,
 }
 
 impl FromRef<AppState> for TrustedProxies {
@@ -68,6 +71,7 @@ pub fn app(state: AppState) -> Router {
         .route("/api/v1/openapi.json", get(openapi::contract))
         .route("/.well-known/ruchoir-product", get(product::describe))
         .merge(inbox::router())
+        .merge(live::routes::router())
         .fallback(|| async { Problem::not_found() })
         .with_state(state)
         .layer(guard)
@@ -133,11 +137,13 @@ async fn start(config: Config) -> Result<(), Failure> {
             None
         }
     };
+    let fanout = live::Fanout::start(&config.valkey_url, valkey.clone()).await?;
     let state = AppState {
         config: Arc::new(config),
         db,
         valkey,
         verifier,
+        fanout,
     };
     serve(state).await?;
     Ok(())

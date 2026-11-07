@@ -28,6 +28,7 @@ use uuid::Uuid;
 
 use crate::auth::{Person, Publisher};
 use crate::AppState;
+use ruchoir_events::ClientFrame;
 
 const DEFAULT_LIMIT: u64 = 30;
 const MAX_LIMIT: u64 = 100;
@@ -156,8 +157,8 @@ pub async fn publish(
                 ids.into(),
                 recipients.clone().into(),
                 publisher.client_id.into(),
-                publication.kind.into(),
-                publication.category.into(),
+                publication.kind.clone().into(),
+                publication.category.clone().into(),
                 publication.organisation.into(),
                 publication.actor.into(),
                 publication.object.into(),
@@ -167,6 +168,14 @@ pub async fn publish(
         ))
         .await
         .map_err(internal)?;
+    // The pages and apps the recipients have open learn of it at once (`hub.inbox.new`); the entry
+    // itself is read through the API, so the frame carries only what a badge needs.
+    if let Ok(frame) = ClientFrame::new(
+        "hub.inbox.new",
+        serde_json::json!({ "kind": publication.kind, "category": publication.category, "organisation": publication.organisation }),
+    ) {
+        state.fanout.publish(recipients.clone(), frame).await;
+    }
     Ok((
         StatusCode::ACCEPTED,
         Json(Published {
@@ -347,6 +356,7 @@ pub async fn mark_read(
     if found.is_none() {
         return Err(Problem::not_found());
     }
+    announce_read(&state, person.account, vec![id], false).await;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -380,7 +390,23 @@ pub async fn mark_all_read(
         ))
         .await
         .map_err(internal)?;
+    announce_read(&state, person.account, Vec::new(), true).await;
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// Something was read: every page and app the person has open follows (`hub.inbox.read`), with what
+/// is left unread. It never fails the request, which has done what it was asked.
+async fn announce_read(state: &AppState, account: Uuid, ids: Vec<Uuid>, all: bool) {
+    let unread_count = match unread(state, account, None).await {
+        Ok(count) => count,
+        Err(_) => return,
+    };
+    if let Ok(frame) = ClientFrame::new(
+        "hub.inbox.read",
+        serde_json::json!({ "ids": ids, "all": all, "unread_count": unread_count }),
+    ) {
+        state.fanout.publish(vec![account], frame).await;
+    }
 }
 
 /// The inbox's routes.

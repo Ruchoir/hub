@@ -23,11 +23,17 @@ use utoipa::OpenApi;
         crate::inbox::read,
         crate::inbox::mark_read,
         crate::inbox::mark_all_read,
+        crate::live::routes::publish,
+        crate::live::routes::backchannel_logout,
+        crate::live::tickets::issue,
+        crate::live::ws::open,
+        crate::live::sse::open,
     ),
     tags(
         (name = "health", description = "Probes for the container runtime, the proxy and the installer"),
         (name = "product", description = "What the service is and what it can do"),
         (name = "inbox", description = "What a person was told about, published by the products"),
+        (name = "live", description = "Frames pushed live to the pages and apps a person has open"),
     )
 )]
 pub struct ApiDoc;
