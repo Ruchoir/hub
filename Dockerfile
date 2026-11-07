@@ -9,6 +9,8 @@ WORKDIR /build
 COPY rust-toolchain.toml Cargo.toml Cargo.lock ./
 COPY src ./src
 COPY migration ./migration
+# Cargo loads every workspace member's manifest: the relay's too, though it is not compiled here.
+COPY relay ./relay
 # The binary is copied out of the cached target in the same layer: cache mounts are not part of the
 # image.
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
