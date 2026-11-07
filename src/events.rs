@@ -306,6 +306,21 @@ pub async fn intake(
             .await
             .map_err(internal)?;
     }
+    if event.source == "propolis" {
+        // Something changed in the organisations: read the feed now rather than in a minute.
+        if let Some(replica) = &state.replica {
+            replica.wake.notify_one();
+        }
+        // Signing out everywhere ends every socket of the person, on every process.
+        if kind == "propolis.account.signed_out_everywhere" {
+            if let Some(account) = event.payload["account"]
+                .as_str()
+                .and_then(|a| a.parse().ok())
+            {
+                state.fanout.close_account(account).await;
+            }
+        }
+    }
     Ok(StatusCode::ACCEPTED)
 }
 

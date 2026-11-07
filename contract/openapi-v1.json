@@ -1,6 +1,19 @@
 {
   "components": {
     "schemas": {
+      "Choice": {
+        "description": "A presence to choose.",
+        "properties": {
+          "choice": {
+            "description": "`active`, `away`, `dnd`, `invisible`, or `null` for automatic.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
       "Entry": {
         "description": "One entry, as its reader sees it.",
         "properties": {
@@ -87,6 +100,44 @@
           "status",
           "service",
           "version"
+        ],
+        "type": "object"
+      },
+      "MemberPresence": {
+        "description": "One member's presence.",
+        "properties": {
+          "account": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "presence": {
+            "description": "`active`, `away`, `dnd` or `offline`.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "account",
+          "presence"
+        ],
+        "type": "object"
+      },
+      "MyPresence": {
+        "description": "The person's own presence, as they see it.",
+        "properties": {
+          "choice": {
+            "description": "What they chose, or `null` for automatic.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "presence": {
+            "description": "How it reads to them (`invisible` stays visible to its author).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "presence"
         ],
         "type": "object"
       },
@@ -708,6 +759,91 @@
         "summary": "Mark one entry read. Idempotent; another person's entry is not found.",
         "tags": [
           "inbox"
+        ]
+      }
+    },
+    "/api/v1/me/presence": {
+      "get": {
+        "operationId": "mine",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MyPresence"
+                }
+              }
+            },
+            "description": "The person's presence"
+          }
+        },
+        "summary": "Read one's own presence.",
+        "tags": [
+          "live"
+        ]
+      },
+      "put": {
+        "operationId": "choose",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Choice"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Chosen"
+          },
+          "400": {
+            "description": "Not a presence one may choose"
+          }
+        },
+        "summary": "Choose one's presence; everyone who shares an organisation sees the change.",
+        "tags": [
+          "live"
+        ]
+      }
+    },
+    "/api/v1/organisations/{id}/presence": {
+      "get": {
+        "operationId": "organisation",
+        "parameters": [
+          {
+            "description": "The organisation",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/MemberPresence"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Every member's presence"
+          },
+          "404": {
+            "description": "Not one of the reader's organisations"
+          }
+        },
+        "summary": "The presence of an organisation's members, for one of them.",
+        "tags": [
+          "live"
         ]
       }
     },

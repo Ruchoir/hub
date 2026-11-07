@@ -9,7 +9,7 @@ use ruchoir_events::Publication;
 use ruchoir_http::Problem;
 use uuid::Uuid;
 
-use super::{sse, tickets, ws};
+use super::{presence, sse, tickets, ws};
 use crate::auth::Publisher;
 use crate::AppState;
 
@@ -97,4 +97,12 @@ pub fn router() -> Router<AppState> {
         .route("/api/v1/live/ws", get(ws::open))
         .route("/api/v1/live/sse", get(sse::open))
         .route("/api/v1/backchannel-logout", post(backchannel_logout))
+        .route(
+            "/api/v1/organisations/{id}/presence",
+            get(presence::organisation),
+        )
+        .route(
+            "/api/v1/me/presence",
+            get(presence::mine).put(presence::choose),
+        )
 }

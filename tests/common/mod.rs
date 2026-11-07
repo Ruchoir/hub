@@ -39,6 +39,7 @@ pub fn offline_state() -> AppState {
         db: DatabaseConnection::default(),
         fanout: hub::live::Fanout::detached(valkey.clone()),
         event_keys: hub::events::EventKeys::fixed(ruchoir_events::signature::PublicKeys::new()),
+        replica: None,
         valkey,
         verifier: None,
     }
@@ -84,6 +85,7 @@ pub async fn online_state() -> Option<AppState> {
         db,
         fanout: hub::live::Fanout::detached(valkey.clone()),
         event_keys: hub::events::EventKeys::fixed(ruchoir_events::signature::PublicKeys::new()),
+        replica: None,
         valkey,
         verifier: None,
     })
