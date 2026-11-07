@@ -38,6 +38,7 @@ pub fn offline_state() -> AppState {
         config: Arc::new(config()),
         db: DatabaseConnection::default(),
         fanout: hub::live::Fanout::detached(valkey.clone()),
+        event_keys: hub::events::EventKeys::fixed(ruchoir_events::signature::PublicKeys::new()),
         valkey,
         verifier: None,
     }
@@ -82,6 +83,7 @@ pub async fn online_state() -> Option<AppState> {
         config: Arc::new(config()),
         db,
         fanout: hub::live::Fanout::detached(valkey.clone()),
+        event_keys: hub::events::EventKeys::fixed(ruchoir_events::signature::PublicKeys::new()),
         valkey,
         verifier: None,
     })

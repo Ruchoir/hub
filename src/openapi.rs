@@ -28,12 +28,14 @@ use utoipa::OpenApi;
         crate::live::tickets::issue,
         crate::live::ws::open,
         crate::live::sse::open,
+        crate::events::intake,
     ),
     tags(
         (name = "health", description = "Probes for the container runtime, the proxy and the installer"),
         (name = "product", description = "What the service is and what it can do"),
         (name = "inbox", description = "What a person was told about, published by the products"),
         (name = "live", description = "Frames pushed live to the pages and apps a person has open"),
+        (name = "events", description = "Signed server events, delivered to the services that subscribed"),
     )
 )]
 pub struct ApiDoc;

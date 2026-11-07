@@ -56,6 +56,7 @@ async fn live() -> Option<Live> {
         fanout: hub::live::Fanout::start(&valkey_url, valkey.clone())
             .await
             .unwrap(),
+        event_keys: hub::events::EventKeys::fixed(ruchoir_events::signature::PublicKeys::new()),
         config: Arc::new(config),
         db,
         valkey,

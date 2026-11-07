@@ -37,6 +37,8 @@ pub const CLIENT_ID: &str = "HUB_CLIENT_ID";
 /// The origins of the instance's product pages, comma-separated: the only pages that may open a
 /// socket.
 pub const PAGE_ORIGINS: &str = "HUB_PAGE_ORIGINS";
+/// The subscriptions file the installer writes: which service receives which event kinds.
+pub const SUBSCRIPTIONS: &str = "HUB_SUBSCRIPTIONS";
 
 const DEFAULT_LISTEN: &str = "127.0.0.1:8080";
 const DEFAULT_PUBLIC_URL: &str = "http://localhost:8080";
@@ -69,6 +71,8 @@ pub struct Config {
     pub client_id: Option<String>,
     /// The product pages' origins.
     pub page_origins: Vec<String>,
+    /// The subscriptions file, when there is one.
+    pub subscriptions: Option<std::path::PathBuf>,
 }
 
 impl Config {
@@ -134,6 +138,9 @@ impl Config {
                 .map(|o| o.trim().trim_end_matches('/').to_owned())
                 .filter(|o| !o.is_empty())
                 .collect(),
+            subscriptions: lookup(SUBSCRIPTIONS)
+                .filter(|v| !v.trim().is_empty())
+                .map(std::path::PathBuf::from),
         })
     }
 }
