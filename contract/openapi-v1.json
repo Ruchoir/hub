@@ -351,6 +351,40 @@
         ]
       }
     },
+    "/api/v1/events": {
+      "post": {
+        "operationId": "intake",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          },
+          "description": "A ruchoir-events Event, signed in the Ruchoir-Signature header",
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Stored for every subscriber"
+          },
+          "400": {
+            "description": "Refused (`reason`: `signature`, `source`, `kind_not_yours`, `too_large`)"
+          },
+          "401": {
+            "description": "No valid token"
+          },
+          "403": {
+            "description": "Not a product with `hub:publish`"
+          }
+        },
+        "summary": "Take an event from its emitter.",
+        "tags": [
+          "events"
+        ]
+      }
+    },
     "/api/v1/health": {
       "get": {
         "operationId": "health",
@@ -715,6 +749,10 @@
     {
       "description": "Frames pushed live to the pages and apps a person has open",
       "name": "live"
+    },
+    {
+      "description": "Signed server events, delivered to the services that subscribed",
+      "name": "events"
     }
   ]
 }

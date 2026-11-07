@@ -67,6 +67,14 @@ getrandom = "0.4"
 # The back-channel logout form (Servo project, MIT/Apache-2.0).
 form_urlencoded = "1"
 
+# Delivering events to their subscribers (Sean McArthur and community, MIT/Apache-2.0), the
+# version ruchoir-auth uses, over the rustls client it builds.
+reqwest = { version = "0.13.5", default-features = false }
+# The subscriptions file the installer writes (toml-rs community, MIT/Apache-2.0).
+toml = "1.2.1"
+# Event keys as Propolis publishes them (Marshall Pierce, community, MIT/Apache-2.0).
+base64 = "0.22"
+
 [dev-dependencies]
 # A WebSocket client, to open the hub socket in the tests (snapview community, MIT).
 tokio-tungstenite = "0.30"

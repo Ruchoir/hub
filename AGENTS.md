@@ -133,6 +133,8 @@ src/live/            live delivery, from the monolith's realtime/: fanout.rs (co
                      channel, closing across processes), opener.rs and tickets.rs (who opens a socket:
                      a page's single-use ticket or an app's token), ws.rs and sse.rs, presence.rs (the
                      heartbeat), routes.rs (products publish, Propolis's back-channel logout)
+src/events.rs        server events (ADR 0015): the keys from Propolis, the subscriptions file, the intake
+                     (signature, source, kind) and the delivery with retries for a day
 src/openapi.rs       ApiDoc, served at /api/v1/openapi.json; every route registers here
 migration/           the hub-migration crate
 relay/               the push relay (`ruchoir-push-relay`), from the monolith: run by the publisher,
@@ -160,6 +162,7 @@ compose.yaml         PostgreSQL and Valkey for a development machine
 | `HUB_ISSUER` | unset: every authenticated call refused | Propolis's issuer (`https://id.<domain>`). The hub accepts its access tokens whose audience is `HUB_PUBLIC_URL` |
 | `HUB_CLIENT_ID` | unset: back-channel logout refused | The hub's client id at Propolis: the audience of the logout tokens that close a session's sockets |
 | `HUB_PAGE_ORIGINS` | none | The origins of the instance's product pages, comma-separated: the only pages that may open a socket (ADR 0016) |
+| `HUB_SUBSCRIPTIONS` | unset: no subscription | The subscriptions file the installer writes (TOML): which service receives which event kinds, at an endpoint on one of `HUB_PAGE_ORIGINS`. Applied whole at start |
 | `RUST_LOG` | `info` | Log filter |
 
 ### What will live here

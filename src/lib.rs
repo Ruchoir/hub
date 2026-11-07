@@ -11,6 +11,7 @@ pub mod auth;
 pub mod cache;
 pub mod config;
 pub mod db;
+pub mod events;
 pub mod health;
 pub mod inbox;
 pub mod live;
@@ -51,6 +52,8 @@ pub struct AppState {
     pub verifier: Option<ruchoir_auth::Verifier>,
     /// This process's live connections, and the channel to the other processes.
     pub fanout: Arc<live::Fanout>,
+    /// Every service's event keys, from Propolis.
+    pub event_keys: events::EventKeys,
 }
 
 impl FromRef<AppState> for TrustedProxies {
@@ -72,6 +75,7 @@ pub fn app(state: AppState) -> Router {
         .route("/.well-known/ruchoir-product", get(product::describe))
         .merge(inbox::router())
         .merge(live::routes::router())
+        .merge(events::router())
         .fallback(|| async { Problem::not_found() })
         .with_state(state)
         .layer(guard)
@@ -138,12 +142,29 @@ async fn start(config: Config) -> Result<(), Failure> {
         }
     };
     let fanout = live::Fanout::start(&config.valkey_url, valkey.clone()).await?;
+    let http = ruchoir_auth::http_client()?;
+    let event_keys = match &config.issuer {
+        Some(issuer) => events::EventKeys::of_issuer(issuer, http.clone()),
+        None => events::EventKeys::fixed(ruchoir_events::signature::PublicKeys::new()),
+    };
+    if let Some(path) = &config.subscriptions {
+        let text = std::fs::read_to_string(path)
+            .map_err(|error| format!("cannot read {}: {error}", path.display()))?;
+        let subscriptions = events::Subscriptions::parse(&text, &config.page_origins)?;
+        subscriptions.apply(&db).await?;
+        tracing::info!(
+            services = subscriptions.subscriptions.len(),
+            "event subscriptions applied"
+        );
+    }
+    events::spawn(db.clone(), http);
     let state = AppState {
         config: Arc::new(config),
         db,
         valkey,
         verifier,
         fanout,
+        event_keys,
     };
     serve(state).await?;
     Ok(())
