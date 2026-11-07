@@ -5,12 +5,12 @@ use std::future::Future;
 use std::pin::Pin;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use jsonwebtoken::{Algorithm, EncodingKey, Header};
+use jwt_simple::prelude::{ECDSAP256KeyPairLike, ES256KeyPair};
 use serde::Serialize;
 use serde_json::{json, Value};
 use tokio::sync::Mutex;
 
-use crate::{Kind, Outcome, Pusher};
+use crate::{exact_claims, Kind, Outcome, Pusher};
 
 /// Production APNs: every Ruchoir build is signed for the App Store (TestFlight included).
 pub const PRODUCTION_HOST: &str = "api.push.apple.com";
@@ -20,9 +20,8 @@ pub struct Apns {
     client: reqwest::Client,
     host: String,
     topic: String,
-    key_id: String,
     team_id: String,
-    key: EncodingKey,
+    key: ES256KeyPair,
     token: Mutex<Option<(String, Instant)>>,
 }
 
@@ -79,7 +78,9 @@ impl Apns {
         topic: &str,
         host: &str,
     ) -> Result<Self, String> {
-        let key = EncodingKey::from_ec_pem(pem.as_bytes()).map_err(|e| format!("APNs key: {e}"))?;
+        let key = ES256KeyPair::from_pem(pem)
+            .map_err(|e| format!("APNs key: {e}"))?
+            .with_key_id(key_id);
         let client = reqwest::Client::builder()
             .http2_prior_knowledge()
             .timeout(Duration::from_secs(10))
@@ -89,7 +90,6 @@ impl Apns {
             client,
             host: host.to_owned(),
             topic: topic.to_owned(),
-            key_id: key_id.to_owned(),
             team_id: team_id.to_owned(),
             key,
             token: Mutex::new(None),
@@ -107,17 +107,13 @@ impl Apns {
             .duration_since(UNIX_EPOCH)
             .map_err(|e| e.to_string())?
             .as_secs();
-        let mut header = Header::new(Algorithm::ES256);
-        header.kid = Some(self.key_id.clone());
-        let token = jsonwebtoken::encode(
-            &header,
-            &Claims {
+        let token = self
+            .key
+            .sign(exact_claims(Claims {
                 iss: &self.team_id,
                 iat,
-            },
-            &self.key,
-        )
-        .map_err(|e| format!("APNs token: {e}"))?;
+            }))
+            .map_err(|e| format!("APNs token: {e}"))?;
         *cached = Some((token.clone(), Instant::now()));
         Ok(token)
     }
@@ -216,6 +212,46 @@ mod tests {
             Outcome::Failed(_)
         ));
         assert!(matches!(outcome(0, Some("timeout")), Outcome::Failed(_)));
+    }
+
+    #[test]
+    fn the_token_says_only_what_apple_asks() {
+        let pem = jwt_simple::prelude::ES256KeyPair::generate()
+            .to_pem()
+            .unwrap();
+        let apns = Apns::new(
+            &pem,
+            "KEY123",
+            "TEAM456",
+            "com.ruchoir.app",
+            PRODUCTION_HOST,
+        )
+        .unwrap();
+        let token = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(apns.bearer(true))
+            .unwrap();
+        let part = |i: usize| -> Value {
+            use base64::Engine as _;
+            let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+                .decode(token.split('.').nth(i).unwrap())
+                .unwrap();
+            serde_json::from_slice(&bytes).unwrap()
+        };
+        assert_eq!(part(0)["alg"], "ES256");
+        assert_eq!(part(0)["kid"], "KEY123");
+        let claims = part(1);
+        let mut names: Vec<&str> = claims
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect();
+        names.sort_unstable();
+        assert_eq!(names, vec!["iat", "iss"]);
+        assert_eq!(claims["iss"], "TEAM456");
     }
 
     #[test]

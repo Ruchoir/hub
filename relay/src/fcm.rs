@@ -5,12 +5,12 @@ use std::future::Future;
 use std::pin::Pin;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use jsonwebtoken::{Algorithm, EncodingKey, Header};
+use jwt_simple::prelude::{RS256KeyPair, RSAKeyPairLike};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tokio::sync::Mutex;
 
-use crate::{Kind, Outcome, Pusher};
+use crate::{exact_claims, Kind, Outcome, Pusher};
 
 const SCOPE: &str = "https://www.googleapis.com/auth/firebase.messaging";
 const DEFAULT_TOKEN_URI: &str = "https://oauth2.googleapis.com/token";
@@ -30,7 +30,7 @@ pub struct Fcm {
     project_id: String,
     client_email: String,
     token_uri: String,
-    key: EncodingKey,
+    key: RS256KeyPair,
     access: Mutex<Option<(String, Instant)>>,
 }
 
@@ -87,8 +87,8 @@ impl Fcm {
     pub fn new(account_json: &str) -> Result<Self, String> {
         let account: ServiceAccount =
             serde_json::from_str(account_json).map_err(|e| format!("FCM service account: {e}"))?;
-        let key = EncodingKey::from_rsa_pem(account.private_key.as_bytes())
-            .map_err(|e| format!("FCM key: {e}"))?;
+        let key =
+            RS256KeyPair::from_pem(&account.private_key).map_err(|e| format!("FCM key: {e}"))?;
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(10))
             .build()
@@ -116,18 +116,16 @@ impl Fcm {
             .duration_since(UNIX_EPOCH)
             .map_err(|e| e.to_string())?
             .as_secs();
-        let assertion = jsonwebtoken::encode(
-            &Header::new(Algorithm::RS256),
-            &Claims {
+        let assertion = self
+            .key
+            .sign(exact_claims(Claims {
                 iss: &self.client_email,
                 scope: SCOPE,
                 aud: &self.token_uri,
                 iat,
                 exp: iat + 3600,
-            },
-            &self.key,
-        )
-        .map_err(|e| format!("FCM assertion: {e}"))?;
+            }))
+            .map_err(|e| format!("FCM assertion: {e}"))?;
         let response: Value = self
             .client
             .post(&self.token_uri)

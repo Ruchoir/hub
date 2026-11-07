@@ -18,9 +18,13 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 # HTTP/2 for APNs, rustls with the community `ring` provider (no AWS crypto, as the API).
 reqwest = { version = "0.12", default-features = false, features = ["json", "http2", "rustls-tls-webpki-roots"] }
-# The APNs (ES256) and Google service-account (RS256) tokens, on the RustCrypto backend.
-jsonwebtoken = { version = "11.1.0", default-features = false, features = ["use_pem", "rust_crypto"] }
+# The APNs (ES256) and Google service-account (RS256) tokens (Frank Denis, France, ISC), on its pure
+# Rust backend, as Propolis. jsonwebtoken, used before, pulled a RustCrypto stack with an advisory
+# and no fixed release (RUSTSEC-2026-0387).
+jwt-simple = { version = "0.15.0", default-features = false, features = ["pure-rust"] }
 
 [dev-dependencies]
+# Reading a token back in the tests (Marshall Pierce, community, MIT/Apache-2.0).
+base64 = "0.22"
 tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"
