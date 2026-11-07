@@ -1,0 +1,63 @@
+[package]
+name = "hub"
+version = "0.1.0"
+description = "The hub: notifications and real time for every Ruchoir instance."
+edition = "2021"
+rust-version = "1.96"
+license = "AGPL-3.0-only"
+repository = "https://github.com/Ruchoir/hub"
+publish = false
+
+[workspace]
+members = ["migration"]
+
+# The service is a library (everything runs from `hub::run`, and the tests build the router from
+# `hub::app`) and a thin binary.
+[lib]
+name = "hub"
+path = "src/lib.rs"
+
+[[bin]]
+name = "hub"
+path = "src/main.rs"
+
+[dependencies]
+# The shared HTTP layer of every Ruchoir service (Ruchoir/core), read from its release tag (ADR 0013).
+ruchoir-http = { git = "https://github.com/Ruchoir/core", tag = "v0.1.0" }
+# The web framework every Ruchoir service is built on (tokio-rs community, MIT).
+axum = "0.8"
+# The async runtime: the listener, and the signals of a graceful shutdown (tokio-rs community, MIT).
+tokio = { version = "1.53", features = ["rt-multi-thread", "net", "macros", "signal", "time"] }
+# Structured logs filtered by RUST_LOG (tokio-rs community, MIT).
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+# JSON bodies (serde community, MIT/Apache-2.0).
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# The OpenAPI contract, derived from the code (utoipa community, MIT/Apache-2.0).
+utoipa = { version = "5", features = ["axum_extras", "uuid"] }
+# PostgreSQL through SeaORM (SeaQL community, MIT/Apache-2.0), with the features the products use.
+sea-orm = { version = "2.0.2", default-features = false, features = [
+    "sqlx-postgres",
+    "runtime-tokio",
+    "macros",
+    "with-uuid",
+    "with-time",
+    "with-json",
+] }
+hub-migration = { path = "migration" }
+# Valkey through fred (Alec Embke, community, MIT), as in the products.
+fred = "10.1.0"
+# Identifiers (uuid-rs community, MIT/Apache-2.0).
+uuid = { version = "1.26", features = ["v4", "serde"] }
+# Timestamps (time-rs community, MIT/Apache-2.0).
+time = "0.3.55"
+
+[dev-dependencies]
+ruchoir-contract = { git = "https://github.com/Ruchoir/core", tag = "v0.1.0" }
+# `oneshot` on the router, in the tests (tokio-rs community, MIT).
+tower = { version = "0.5", features = ["util"] }
+# Reading a response body in the tests (hyperium community, MIT).
+http-body-util = "0.1"
+# Applying the migrations once per test binary.
+tokio = { version = "1.53", features = ["sync"] }

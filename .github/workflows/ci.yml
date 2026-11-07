@@ -11,3 +11,60 @@ permissions:
 jobs:
   conventions:
     uses: Ruchoir/.github/.github/workflows/conventions.yml@v1
+
+  rust:
+    uses: Ruchoir/.github/.github/workflows/rust.yml@v1.7.0
+    with:
+      rules-ref: v1.7.0
+      postgres: true
+      valkey: true
+
+  image:
+    name: Image
+    runs-on: ubuntu-latest
+    # The service reaches its stores before it listens, so the image is tried next to real ones.
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: hub
+          POSTGRES_PASSWORD: hub
+          POSTGRES_DB: hub
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U hub"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      valkey:
+        image: valkey/valkey:9-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "valkey-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v7.0.1
+
+      - name: Build the image
+        run: docker build --tag hub:ci .
+
+      - name: Start it and ask its probes
+        run: |
+          docker run --detach --name hub --network host             --env HUB_DATABASE_URL=postgres://hub:hub@127.0.0.1:5432/hub             --env HUB_VALKEY_URL=redis://127.0.0.1:6379             hub:ci
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8080/healthz; then break; fi
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:8080/healthz | grep -q '"status":"ok"'
+          curl -fsS http://127.0.0.1:8080/api/v1/health | grep -q '"status":"ok"'
+          curl -fsS http://127.0.0.1:8080/.well-known/ruchoir-product | grep -q '"name":"hub"'
+          test "$(docker inspect --format '{{.Config.User}}' hub)" = hub
+
+      - name: Show the logs
+        if: always()
+        run: docker logs hub || true

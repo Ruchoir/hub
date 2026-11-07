@@ -1,0 +1,194 @@
+{
+  "components": {
+    "schemas": {
+      "Health": {
+        "description": "Liveness: always `ok` when it answers.",
+        "properties": {
+          "service": {
+            "description": "The service that answers.",
+            "example": "hub",
+            "type": "string"
+          },
+          "status": {
+            "description": "Always `\"ok\"` when the endpoint responds.",
+            "example": "ok",
+            "type": "string"
+          },
+          "version": {
+            "description": "The version of the running binary.",
+            "example": "0.1.0",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "service",
+          "version"
+        ],
+        "type": "object"
+      },
+      "ProductDescription": {
+        "description": "The description of a Ruchoir product or service.",
+        "properties": {
+          "api": {
+            "description": "The API majors served, each under `/api/<major>/`.",
+            "example": [
+              "v1"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "features": {
+            "description": "The features served. A client checks one before relying on it.",
+            "example": [],
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "name": {
+            "description": "The product's name, as the manifest of the instance lists it.",
+            "example": "hub",
+            "type": "string"
+          },
+          "version": {
+            "description": "The version of the running build.",
+            "example": "0.1.0",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "version",
+          "api",
+          "features"
+        ],
+        "type": "object"
+      },
+      "Readiness": {
+        "description": "Readiness, with what each store answered.",
+        "properties": {
+          "cache": {
+            "description": "Valkey: `\"ok\"` or `\"down\"`.",
+            "example": "ok",
+            "type": "string"
+          },
+          "database": {
+            "description": "PostgreSQL: `\"ok\"` or `\"down\"`.",
+            "example": "ok",
+            "type": "string"
+          },
+          "service": {
+            "description": "The service that answers.",
+            "example": "hub",
+            "type": "string"
+          },
+          "status": {
+            "description": "`\"ok\"` when every store answers, `\"degraded\"` otherwise.",
+            "example": "ok",
+            "type": "string"
+          },
+          "version": {
+            "description": "The version of the running binary.",
+            "example": "0.1.0",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "service",
+          "version",
+          "database",
+          "cache"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "description": "Notifications and real time for every Ruchoir instance.",
+    "license": {
+      "identifier": "AGPL-3.0-only",
+      "name": "AGPL-3.0-only"
+    },
+    "title": "Hub API"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/.well-known/ruchoir-product": {
+      "get": {
+        "operationId": "describe",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductDescription"
+                }
+              }
+            },
+            "description": "The service's description"
+          }
+        },
+        "summary": "What this service is and what it can do.",
+        "tags": [
+          "product"
+        ]
+      }
+    },
+    "/api/v1/health": {
+      "get": {
+        "operationId": "health",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Readiness"
+                }
+              }
+            },
+            "description": "What each store answered"
+          }
+        },
+        "summary": "Readiness probe: whether PostgreSQL and Valkey answer.",
+        "tags": [
+          "health"
+        ]
+      }
+    },
+    "/healthz": {
+      "get": {
+        "operationId": "healthz",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Health"
+                }
+              }
+            },
+            "description": "The process is up"
+          }
+        },
+        "summary": "Liveness probe, for the container runtime and the reverse proxy.",
+        "tags": [
+          "health"
+        ]
+      }
+    }
+  },
+  "tags": [
+    {
+      "description": "Probes for the container runtime, the proxy and the installer",
+      "name": "health"
+    },
+    {
+      "description": "What the service is and what it can do",
+      "name": "product"
+    }
+  ]
+}
