@@ -38,6 +38,7 @@ pub fn offline_state() -> AppState {
         config: Arc::new(config()),
         db: DatabaseConnection::default(),
         valkey,
+        verifier: None,
     }
 }
 
@@ -80,6 +81,7 @@ pub async fn online_state() -> Option<AppState> {
         config: Arc::new(config()),
         db,
         valkey,
+        verifier: None,
     })
 }
 

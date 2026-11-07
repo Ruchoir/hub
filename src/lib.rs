@@ -7,6 +7,7 @@
 //!
 //! The skeleton is Propolis's (Ruchoir/propolis, step 2.1 of the restructuring).
 
+pub mod auth;
 pub mod cache;
 pub mod config;
 pub mod db;
@@ -44,6 +45,8 @@ pub struct AppState {
     pub db: DatabaseConnection,
     /// The Valkey pool.
     pub valkey: Pool,
+    /// Checks Propolis's access tokens for the hub; `None` without `HUB_ISSUER`.
+    pub verifier: Option<ruchoir_auth::Verifier>,
 }
 
 impl FromRef<AppState> for TrustedProxies {
@@ -116,10 +119,23 @@ async fn start(config: Config) -> Result<(), Failure> {
         Migrator::up(&db, None).await?;
         tracing::info!("migrations applied at start-up (HUB_AUTO_MIGRATE)");
     }
+    let verifier = match &config.issuer {
+        // The hub's resource identifier is its public origin: the audience of its tokens.
+        Some(issuer) => Some(ruchoir_auth::Verifier::new(
+            issuer.clone(),
+            config.public_origin.clone(),
+            ruchoir_auth::KeySet::of_issuer(issuer, ruchoir_auth::http_client()?),
+        )),
+        None => {
+            tracing::warn!("HUB_ISSUER unset: every authenticated call is refused");
+            None
+        }
+    };
     let state = AppState {
         config: Arc::new(config),
         db,
         valkey,
+        verifier,
     };
     serve(state).await?;
     Ok(())
