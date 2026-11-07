@@ -127,6 +127,8 @@ src/health.rs        /healthz (the process is up) and /api/v1/health (whether bo
 src/product.rs       /.well-known/ruchoir-product: name, version, API majors, FEATURES
 src/auth.rs          who calls: Propolis's tokens for the hub, Publisher (a product with hub:publish)
                      and Person (a person, for what is theirs)
+src/inbox.rs         the inbox: POST /api/v1/inbox (a product publishes), /api/v1/me/inbox (a person
+                     reads and marks), from the monolith's notifications without the chat's logic
 src/openapi.rs       ApiDoc, served at /api/v1/openapi.json; every route registers here
 migration/           the hub-migration crate
 relay/               the push relay (`ruchoir-push-relay`), from the monolith: run by the publisher,
