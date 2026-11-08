@@ -4,12 +4,10 @@
 
 use std::sync::Arc;
 
-use serde::Deserialize;
-
 /// The hub's client at Propolis.
 pub struct Propolis {
     issuer: String,
-    credentials: ruchoir_auth::Credentials,
+    client: ruchoir_auth::Client,
     http: reqwest::Client,
 }
 
@@ -19,9 +17,10 @@ impl Propolis {
         credentials: ruchoir_auth::Credentials,
         http: reqwest::Client,
     ) -> Arc<Self> {
+        let issuer = issuer.trim_end_matches('/').to_owned();
         Arc::new(Self {
-            issuer: issuer.trim_end_matches('/').to_owned(),
-            credentials,
+            client: ruchoir_auth::Client::new(&issuer, credentials, http.clone()),
+            issuer,
             http,
         })
     }
@@ -36,40 +35,13 @@ impl Propolis {
         &self.http
     }
 
-    /// A service token carrying `scope`, in the hub's own name.
-    ///
-    /// Asked here rather than through `ruchoir_auth::Client`, whose futures are not `Send` in core
-    /// v0.2.0 (fixed for the next release): this runs in spawned tasks.
+    /// A service token carrying `scope`, in the hub's own name, kept by `ruchoir-auth` until a
+    /// minute before it expires.
     pub async fn token(&self, scope: &str) -> Result<String, String> {
-        #[derive(Deserialize)]
-        struct Answer {
-            access_token: String,
-        }
-        let assertion = self
-            .credentials
-            .assertion(&self.issuer)
-            .map_err(|e| e.to_string())?;
-        let body = {
-            let mut form = form_urlencoded::Serializer::new(String::new());
-            form.append_pair("grant_type", "client_credentials")
-                .append_pair("scope", scope)
-                .append_pair("client_assertion_type", ruchoir_auth::client::JWT_BEARER)
-                .append_pair("client_assertion", &assertion);
-            form.finish()
-        };
-        let answer: Answer = self
-            .http
-            .post(format!("{}/oauth/token", self.issuer))
-            .header("content-type", "application/x-www-form-urlencoded")
-            .body(body)
-            .send()
+        self.client
+            .client_credentials(None, &[scope])
             .await
-            .map_err(|e| e.without_url().to_string())?
-            .error_for_status()
-            .map_err(|e| e.without_url().to_string())?
-            .json()
-            .await
-            .map_err(|e| e.without_url().to_string())?;
-        Ok(answer.access_token)
+            .map(|tokens| tokens.access_token)
+            .map_err(|e| e.to_string())
     }
 }

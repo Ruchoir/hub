@@ -2519,7 +2519,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash",
  "rustls",
- "socket2 0.6.5",
+ "socket2 0.5.10",
  "thiserror",
  "tokio",
  "tracing",
@@ -2557,7 +2557,7 @@ dependencies = [
  "cfg_aliases",
  "libc",
  "once_cell",
- "socket2 0.6.5",
+ "socket2 0.5.10",
  "tracing",
  "windows-sys 0.61.2",
 ]
@@ -2843,31 +2843,34 @@ dependencies = [
 
 [[package]]
 name = "ruchoir-auth"
-version = "0.2.0"
-source = "git+https://github.com/Ruchoir/core?tag=v0.2.0#aaa05b173c516febf20e11b0e3b5a713d7d96b7e"
+version = "0.3.0"
+source = "git+https://github.com/Ruchoir/core?tag=v0.3.0#608ba9d209c52e658e525e1a9a760c54078b27e2"
 dependencies = [
+ "base64 0.23.1",
  "form_urlencoded",
+ "getrandom 0.4.3",
  "jwt-simple",
  "reqwest 0.13.5",
  "rustls",
  "serde",
  "serde_json",
+ "sha2 0.11.1",
  "tokio",
  "uuid",
 ]
 
 [[package]]
 name = "ruchoir-contract"
-version = "0.2.0"
-source = "git+https://github.com/Ruchoir/core?tag=v0.2.0#aaa05b173c516febf20e11b0e3b5a713d7d96b7e"
+version = "0.3.0"
+source = "git+https://github.com/Ruchoir/core?tag=v0.3.0#608ba9d209c52e658e525e1a9a760c54078b27e2"
 dependencies = [
  "serde_json",
 ]
 
 [[package]]
 name = "ruchoir-events"
-version = "0.2.0"
-source = "git+https://github.com/Ruchoir/core?tag=v0.2.0#aaa05b173c516febf20e11b0e3b5a713d7d96b7e"
+version = "0.3.0"
+source = "git+https://github.com/Ruchoir/core?tag=v0.3.0#608ba9d209c52e658e525e1a9a760c54078b27e2"
 dependencies = [
  "base64 0.23.1",
  "ring",
@@ -2879,8 +2882,8 @@ dependencies = [
 
 [[package]]
 name = "ruchoir-http"
-version = "0.2.0"
-source = "git+https://github.com/Ruchoir/core?tag=v0.2.0#aaa05b173c516febf20e11b0e3b5a713d7d96b7e"
+version = "0.3.0"
+source = "git+https://github.com/Ruchoir/core?tag=v0.3.0#608ba9d209c52e658e525e1a9a760c54078b27e2"
 dependencies = [
  "axum",
  "getrandom 0.4.3",
