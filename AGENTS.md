@@ -132,8 +132,10 @@ src/inbox.rs         the inbox: POST /api/v1/inbox (a product publishes), /api/v
 src/live/            live delivery, from the monolith's realtime/: fanout.rs (connections and the Valkey
                      channel, closing across processes), opener.rs and tickets.rs (who opens a socket:
                      a page's single-use ticket or an app's token), ws.rs and sse.rs, presence.rs (the
-                     heartbeat, connections counted across processes, the chosen presence, who sees it),
-                     routes.rs (products publish, Propolis's back-channel logout)
+                     heartbeat, connections counted across processes, the chosen presence, who sees it,
+                     and POST /api/v1/presence/online: which of these accounts are online, for a
+                     product with hub:publish), routes.rs (products publish, Propolis's back-channel
+                     logout)
 src/events.rs        server events (ADR 0015): the keys from Propolis, the subscriptions file, the intake
                      (signature, source, kind) and the delivery with retries for a day
 src/replica.rs       the members' replica, read from Propolis's change feed (/api/v1/changes) every minute
@@ -194,6 +196,10 @@ compose.yaml         PostgreSQL and Valkey for a development machine
   else is for the product's own interface.
 - A browser's service worker never holds a token: it asks its product's backend, which asks
   `/api/v1/me/push/pending` with a token exchanged for the person. A phone asks with its own.
+- "Online" for a product (`POST /api/v1/presence/online`, the chat's `@ici`) is what others would
+  see as not `offline`: a live heartbeat and any choice but `invisible`, so `away` and `dnd` count.
+  The monolith asked the heartbeat alone and counted `invisible`. At most 5,000 accounts per
+  question (`400 accounts`); two reads whatever the number (one `MGET`, one query).
 - The tests never call out: their configuration empties `HUB_PUSH_RELAY_URL`, and they subscribe
   browsers without publishing to them.
 

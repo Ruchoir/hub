@@ -1,6 +1,6 @@
 //! The members' replica and presence on the real stores: the replica read from a stand-in Propolis's
-//! change feed, presence counted across connections, chosen, and seen by an organisation's members
-//! alone.
+//! change feed, presence counted across connections, chosen, seen by an organisation's members
+//! alone, and asked about by a product.
 
 mod common;
 
@@ -286,4 +286,110 @@ async fn presence_is_counted_chosen_and_seen_by_the_members_alone() {
     )
     .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+/// A token holding `hub:publish`: a product's, or with `person` a person's through that product.
+fn publishing_token(
+    key: &ES256KeyPair,
+    audience: &str,
+    client: &str,
+    person: Option<Uuid>,
+) -> String {
+    let mut custom = json!({ "client_id": client, "scope": hub::auth::PUBLISH });
+    if person.is_some() {
+        custom["auth_time"] = 1_700_000_000.into();
+    }
+    let subject = person.map_or_else(|| client.to_owned(), |p| p.to_string());
+    let claims = Claims::with_custom_claims(custom, Duration::from_mins(5))
+        .with_issuer(ISSUER)
+        .with_audience(audience)
+        .with_subject(subject);
+    let options = HeaderOptions {
+        signature_type: Some("at+jwt".to_owned()),
+        ..Default::default()
+    };
+    key.sign_with_options(claims, &options).unwrap()
+}
+
+#[tokio::test]
+async fn a_product_asks_who_is_online_and_invisible_is_not() {
+    let Some(mut state) = common::online_state().await else {
+        return;
+    };
+    let key = ES256KeyPair::generate().with_key_id("k1");
+    let mut jwk: Value = serde_json::from_str(&key.public_key().to_jwk()).unwrap();
+    jwk["kid"] = "k1".into();
+    let audience = state.config.public_origin.clone();
+    state.verifier = Some(Verifier::new(
+        ISSUER,
+        audience.clone(),
+        KeySet::fixed(&json!({ "keys": [jwk] })),
+    ));
+
+    // Pat is connected, Sam connected and away, Ada connected and invisible, Lou not connected.
+    let (pat, sam, ada, lou) = (
+        Uuid::new_v4(),
+        Uuid::new_v4(),
+        Uuid::new_v4(),
+        Uuid::new_v4(),
+    );
+    for account in [pat, sam, ada] {
+        presence::arrived(&state, account).await;
+    }
+    for (account, choice) in [(sam, "away"), (ada, "invisible")] {
+        let (status, _) = call(
+            &state,
+            Method::PUT,
+            "/api/v1/me/presence",
+            &person_token(&key, &audience, account),
+            Some(json!({ "choice": choice })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+    }
+
+    let path = "/api/v1/presence/online";
+    let asked = json!({ "accounts": [lou, ada, sam, pat, sam] });
+    let (status, answer) = call(
+        &state,
+        Method::POST,
+        path,
+        &publishing_token(&key, &audience, "chat", None),
+        Some(asked.clone()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{answer}");
+    assert_eq!(
+        answer,
+        json!({ "online": [sam, pat] }),
+        "in the order asked, once each, away counted, invisible and absent not"
+    );
+
+    // A person's token never asks, even one carrying the scope.
+    let (status, _) = call(
+        &state,
+        Method::POST,
+        path,
+        &publishing_token(&key, &audience, "chat", Some(pat)),
+        Some(asked),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    // More than 5,000 accounts: refused.
+    let many: Vec<Uuid> = (0..=presence::MAX_ASKED).map(|_| Uuid::new_v4()).collect();
+    let (status, problem) = call(
+        &state,
+        Method::POST,
+        path,
+        &publishing_token(&key, &audience, "chat", None),
+        Some(json!({ "accounts": many })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(problem["reason"], "accounts", "{problem}");
+
+    for account in [pat, sam, ada] {
+        presence::departed(&state, account).await;
+    }
 }
