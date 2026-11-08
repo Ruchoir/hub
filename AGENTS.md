@@ -140,6 +140,14 @@ src/replica.rs       the members' replica, read from Propolis's change feed (/ap
                      and at once when one of its events arrives
 src/prefs.rs         notification preferences, from the monolith's: categories by channel (app, mail),
                      a level per organisation, quiet hours, do not disturb; obeyed by the inbox
+src/push/            from the monolith's notify/: web.rs (browsers' subscriptions, pushes carrying no
+                     content, /api/v1/me/push/pending for a woken device), vapid.rs (the key file the
+                     installer writes) and ece.rs (RFC 8291), phone.rs (phones woken through the
+                     relay), words.rs (the sentences per category in six languages, for a lock screen
+                     and the digest)
+src/digest.rs        the mail digest of what stays unread, worded here and sent by Propolis
+                     (POST /api/v1/mail/digest), so addresses never leave it
+src/propolis.rs      the hub's client at Propolis: service tokens by private_key_jwt
 src/openapi.rs       ApiDoc, served at /api/v1/openapi.json; every route registers here
 migration/           the hub-migration crate
 relay/               the push relay (`ruchoir-push-relay`), from the monolith: run by the publisher,
@@ -169,11 +177,25 @@ compose.yaml         PostgreSQL and Valkey for a development machine
 | `HUB_PAGE_ORIGINS` | none | The origins of the instance's product pages, comma-separated: the only pages that may open a socket (ADR 0016) |
 | `HUB_SUBSCRIPTIONS` | unset: no subscription | The subscriptions file the installer writes (TOML): which service receives which event kinds, at an endpoint on one of `HUB_PAGE_ORIGINS`. Applied whole at start |
 | `HUB_CLIENT_KEY`, `HUB_CLIENT_KEY_ID` | unset: no members' replica | The hub's Ed25519 client key (PEM) the installer generated and its registered id, to read Propolis's change feed in its own name. Without them presence reaches nobody |
+| `HUB_VAPID_KEY` | unset: no web push | The instance's VAPID key, a P-256 private key in PEM (PKCS#8) the installer generated and keeps; replacing it drops every browser's subscription |
+| `HUB_PUSH_HOSTS` | the browsers' own services | The push services the hub may call, by host or parent domain, comma-separated |
+| `HUB_PUSH_RELAY_URL` | `https://ruchoir.com/push` | The publisher's relay that wakes the phones (ADR 0006); empty: no phone |
+| `HUB_DIGEST_DELAY_SECS` | `900` | How long an entry waits unread before the mail digest; `0`: no digest. Needs `HUB_CLIENT_KEY` |
 | `RUST_LOG` | `info` | Log filter |
 
 ### What will live here
 
-- From `Ruchoir/ruchoir`: `apps/api/src/realtime/` and `apps/api/src/notify/`.
+- Moved from `Ruchoir/ruchoir`, with their history: `realtime/`, `notify/` and the inbox.
+
+### Gotchas
+
+- A product names what an entry shows in its `variables`: `actor_name`, `place`, `subject`,
+  `excerpt`. Those four are what a lock screen and the digest read (`src/push/words.rs`); anything
+  else is for the product's own interface.
+- A browser's service worker never holds a token: it asks its product's backend, which asks
+  `/api/v1/me/push/pending` with a token exchanged for the person. A phone asks with its own.
+- The tests never call out: their configuration empties `HUB_PUSH_RELAY_URL`, and they subscribe
+  browsers without publishing to them.
 
 ### Boundaries
 

@@ -186,6 +186,8 @@ pub async fn publish(
     ) {
         state.fanout.publish(recipients.clone(), frame).await;
     }
+    // The browsers and phones of those with no page open, in the background.
+    crate::push::web::dispatch(&state, recipients.clone(), publication.category.clone());
     Ok((
         StatusCode::ACCEPTED,
         Json(Published {
@@ -405,7 +407,7 @@ pub async fn mark_all_read(
 }
 
 /// Something was read: every page and app the person has open follows (`hub.inbox.read`), with what
-/// is left unread. It never fails the request, which has done what it was asked.
+/// is left unread, and so do their phones. It never fails the request, which has done what it was asked.
 async fn announce_read(state: &AppState, account: Uuid, ids: Vec<Uuid>, all: bool) {
     let unread_count = match unread(state, account, None).await {
         Ok(count) => count,
@@ -417,6 +419,8 @@ async fn announce_read(state: &AppState, account: Uuid, ids: Vec<Uuid>, all: boo
     ) {
         state.fanout.publish(vec![account], frame).await;
     }
+    // The phones count again and clear what was read, silently, once the burst of reading is over.
+    crate::push::phone::sync_soon(state, account).await;
 }
 
 /// The inbox's routes.

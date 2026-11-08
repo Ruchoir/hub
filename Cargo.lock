@@ -1487,15 +1487,18 @@ checksum = "df3b46402a9d5adb4c86a0cf463f42e19994e3ee891101b1841f30a545cb49a9"
 name = "hub"
 version = "0.1.0"
 dependencies = [
+ "aes-gcm",
  "axum",
  "base64 0.22.1",
  "form_urlencoded",
  "fred",
  "futures-util",
  "getrandom 0.4.3",
+ "hmac",
  "http-body-util",
  "hub-migration",
  "jwt-simple",
+ "p256",
  "reqwest 0.13.5",
  "ruchoir-auth",
  "ruchoir-contract",

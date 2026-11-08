@@ -112,7 +112,11 @@ async fn the_replica_follows_propolis_change_feed() {
     ])
     .await;
     let credentials = Credentials::new("hub", Ed25519KeyPair::generate(), "hub-auth");
-    let replica = Replica::new(&issuer, credentials, ruchoir_auth::http_client().unwrap());
+    let replica = Replica::new(hub::propolis::Propolis::new(
+        &issuer,
+        credentials,
+        ruchoir_auth::http_client().unwrap(),
+    ));
     let applied = replica.sync(&state.db).await.unwrap();
     assert_eq!(applied, 4, "the standing change is not membership");
     let mut expected = vec![owner, sam];

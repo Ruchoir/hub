@@ -74,6 +74,12 @@ reqwest = { version = "0.13.5", default-features = false, features = ["json"] }
 toml = "1.2.1"
 # Event keys as Propolis publishes them (Marshall Pierce, community, MIT/Apache-2.0).
 base64 = "0.22"
+# Web Push (RustCrypto, community, MIT/Apache-2.0): ECDSA signs the VAPID token the browser's push
+# service checks (RFC 8292), read from the PKCS#8 key the installer writes, and ECDH, HMAC and
+# AES-GCM encrypt each push's constant marker for the browser (RFC 8291).
+p256 = { version = "0.14.0", default-features = false, features = ["ecdsa", "ecdh", "std", "pkcs8", "pem"] }
+hmac = "0.13.0"
+aes-gcm = "0.11.1"
 
 [dev-dependencies]
 # A WebSocket client, to open the hub socket in the tests (snapview community, MIT).

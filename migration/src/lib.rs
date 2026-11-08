@@ -9,6 +9,7 @@ mod m20261110_000001_inbox;
 mod m20261110_000002_events;
 mod m20261110_000003_replica;
 mod m20261110_000004_preferences;
+mod m20261110_000005_push;
 
 /// Every migration of the hub, oldest first.
 pub struct Migrator;
@@ -21,6 +22,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261110_000002_events::Migration),
             Box::new(m20261110_000003_replica::Migration),
             Box::new(m20261110_000004_preferences::Migration),
+            Box::new(m20261110_000005_push::Migration),
         ]
     }
 }

@@ -35,6 +35,14 @@ use utoipa::OpenApi;
         crate::prefs::read,
         crate::prefs::save,
         crate::prefs::set_level,
+        crate::push::web::config,
+        crate::push::web::subscribe,
+        crate::push::web::unsubscribe,
+        crate::push::web::pending,
+        crate::push::web::test,
+        crate::push::phone::register,
+        crate::push::phone::unregister,
+        crate::push::phone::test,
     ),
     tags(
         (name = "health", description = "Probes for the container runtime, the proxy and the installer"),
@@ -43,6 +51,7 @@ use utoipa::OpenApi;
         (name = "live", description = "Frames pushed live to the pages and apps a person has open"),
         (name = "events", description = "Signed server events, delivered to the services that subscribed"),
         (name = "preferences", description = "What reaches a person, through which door, and when"),
+        (name = "push", description = "Browsers and phones woken when no page is open, and what they then show"),
     )
 )]
 pub struct ApiDoc;

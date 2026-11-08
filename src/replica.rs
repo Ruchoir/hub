@@ -133,75 +133,31 @@ struct Entry {
 
 /// Reading Propolis's change feed into the replica.
 pub struct Replica {
-    issuer: String,
-    credentials: ruchoir_auth::Credentials,
-    http: reqwest::Client,
+    propolis: Arc<crate::propolis::Propolis>,
     /// Woken when an event of Propolis's arrives: there is something to read now.
     pub wake: Notify,
 }
 
 impl Replica {
-    pub fn new(
-        issuer: &str,
-        credentials: ruchoir_auth::Credentials,
-        http: reqwest::Client,
-    ) -> Arc<Self> {
+    pub fn new(propolis: Arc<crate::propolis::Propolis>) -> Arc<Self> {
         Arc::new(Self {
-            issuer: issuer.trim_end_matches('/').to_owned(),
-            credentials,
-            http,
+            propolis,
             wake: Notify::new(),
         })
     }
 
-    /// A service token for Propolis's change feed, in the hub's own name.
-    ///
-    /// Asked here rather than through `ruchoir_auth::Client`, whose futures are not `Send` in core
-    /// v0.2.0 (fixed for the next release): this runs in a spawned task.
-    async fn token(&self) -> Result<String, String> {
-        #[derive(Deserialize)]
-        struct Answer {
-            access_token: String,
-        }
-        let assertion = self
-            .credentials
-            .assertion(&self.issuer)
-            .map_err(|e| e.to_string())?;
-        let body = {
-            let mut form = form_urlencoded::Serializer::new(String::new());
-            form.append_pair("grant_type", "client_credentials")
-                .append_pair("scope", SCOPE)
-                .append_pair("client_assertion_type", ruchoir_auth::client::JWT_BEARER)
-                .append_pair("client_assertion", &assertion);
-            form.finish()
-        };
-        let answer: Answer = self
-            .http
-            .post(format!("{}/oauth/token", self.issuer))
-            .header("content-type", "application/x-www-form-urlencoded")
-            .body(body)
-            .send()
-            .await
-            .map_err(|e| e.without_url().to_string())?
-            .error_for_status()
-            .map_err(|e| e.without_url().to_string())?
-            .json()
-            .await
-            .map_err(|e| e.without_url().to_string())?;
-        Ok(answer.access_token)
-    }
-
     /// Read the feed from where the replica stopped to its end. Returns the changes applied.
     pub async fn sync(&self, db: &DatabaseConnection) -> Result<usize, String> {
-        let token = self.token().await?;
+        let token = self.propolis.token(SCOPE).await?;
         let mut applied = 0;
         loop {
             let after = cursor(db).await.map_err(|e| e.to_string())?;
             let page: Page = self
-                .http
+                .propolis
+                .http()
                 .get(format!(
                     "{}/api/v1/changes?after={after}&limit=500",
-                    self.issuer
+                    self.propolis.issuer()
                 ))
                 .bearer_auth(&token)
                 .send()
