@@ -143,6 +143,16 @@ pub async fn publish(
     Json(publication): Json<Publication>,
 ) -> Result<(StatusCode, Json<Published>), Problem> {
     let recipients = publication.check(&publisher.client_id).map_err(refuse)?;
+    // The product filtered what only it knows; the hub applies each person's own settings.
+    let recipients = crate::prefs::wanting(
+        &state.db,
+        &recipients,
+        &publication.category,
+        publication.organisation,
+        crate::prefs::Delivery::App,
+    )
+    .await
+    .map_err(internal)?;
     let variables = Value::Object(publication.variables.clone());
     let ids: Vec<Uuid> = recipients.iter().map(|_| Uuid::new_v4()).collect();
     // One statement for every recipient: a publication is stored whole or not at all.
