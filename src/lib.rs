@@ -11,6 +11,7 @@ pub mod auth;
 pub mod cache;
 pub mod config;
 pub mod db;
+pub mod digest;
 pub mod events;
 pub mod health;
 pub mod inbox;
@@ -18,6 +19,8 @@ pub mod live;
 pub mod openapi;
 pub mod prefs;
 pub mod product;
+pub mod propolis;
+pub mod push;
 pub mod replica;
 
 use std::net::SocketAddr;
@@ -58,6 +61,9 @@ pub struct AppState {
     pub event_keys: events::EventKeys,
     /// The members' replica, when the hub can read Propolis's change feed.
     pub replica: Option<Arc<replica::Replica>>,
+    /// The hub's client at Propolis (the replica, the digest), when it has its key.
+    pub propolis: Option<Arc<propolis::Propolis>>,
+    pub push: Arc<push::Push>,
 }
 
 impl FromRef<AppState> for TrustedProxies {
@@ -80,6 +86,7 @@ pub fn app(state: AppState) -> Router {
         .merge(inbox::router())
         .merge(live::routes::router())
         .merge(events::router())
+        .merge(push::router())
         .route(
             "/api/v1/me/notification-preferences",
             get(prefs::read).put(prefs::save),
@@ -169,22 +176,33 @@ async fn start(config: Config) -> Result<(), Failure> {
             "event subscriptions applied"
         );
     }
-    let replica = match (&config.issuer, &config.client_id, &config.client_key) {
+    let propolis = match (&config.issuer, &config.client_id, &config.client_key) {
         (Some(issuer), Some(client_id), Some((path, kid))) => {
             let pem = std::fs::read_to_string(path)
                 .map_err(|error| format!("cannot read {}: {error}", path.display()))?;
             let credentials = ruchoir_auth::Credentials::from_pem(client_id.clone(), &pem, kid)?;
-            let replica = replica::Replica::new(issuer, credentials, http.clone());
-            replica.spawn(db.clone());
-            Some(replica)
+            Some(propolis::Propolis::new(issuer, credentials, http.clone()))
         }
         _ => {
             tracing::warn!(
-                "no HUB_CLIENT_KEY: the members' replica is not kept, presence reaches nobody"
+                "no HUB_CLIENT_KEY: the members' replica is not kept, presence reaches nobody,                  and no digest is mailed"
             );
             None
         }
     };
+    let replica = propolis.as_ref().map(|propolis| {
+        let replica = replica::Replica::new(propolis.clone());
+        replica.spawn(db.clone());
+        replica
+    });
+    let vapid = match &config.vapid_key {
+        Some(path) => Some(push::vapid::VapidKeys::read(path)?),
+        None => {
+            tracing::warn!("no HUB_VAPID_KEY: no web push");
+            None
+        }
+    };
+    let push = Arc::new(push::Push::new(vapid, http.clone()));
     events::spawn(db.clone(), http);
     let state = AppState {
         config: Arc::new(config),
@@ -194,7 +212,10 @@ async fn start(config: Config) -> Result<(), Failure> {
         fanout,
         event_keys,
         replica,
+        propolis,
+        push,
     };
+    digest::spawn(state.clone());
     serve(state).await?;
     Ok(())
 }

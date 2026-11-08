@@ -318,6 +318,8 @@ pub async fn intake(
                 .and_then(|a| a.parse().ok())
             {
                 state.fanout.close_account(account).await;
+                // A phone that is signed out must not keep being woken.
+                crate::push::phone::forget_account(&state.db, account).await;
             }
         }
     }

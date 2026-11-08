@@ -2,12 +2,11 @@
 //! publisher's relay.
 //!
 //! The instance never holds Apple's or Google's keys. It posts a device's token to the relay
-//! (`Config::push_relay_url`), which sends a constant push; the phone then asks this instance what
-//! to show (`GET /api/v1/push/pending`, as the browsers' service worker does). Which notifications
-//! wake a phone is decided where the browsers' are ([`super::push`]): same preferences, same quiet
-//! hours, same administrator switch.
+//! (`HUB_PUSH_RELAY_URL`), which sends a constant push; the phone then asks the hub what to show
+//! (`GET /api/v1/me/push/pending`, with its own token for the hub), as a browser's worker does
+//! through its product. Which entries wake a phone is decided where the browsers' are
+//! ([`super::web`]): same settings, same quiet hours.
 
-use std::sync::OnceLock;
 use std::time::Duration;
 
 use axum::extract::State;
@@ -15,18 +14,16 @@ use axum::http::StatusCode;
 use axum::Json;
 use fred::interfaces::KeysInterface;
 use fred::types::{Expiration, SetOptions};
-use sea_orm::sea_query::OnConflict;
-use sea_orm::ActiveValue::Set;
-use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
+use ruchoir_http::Problem;
+use sea_orm::{ConnectionTrait, DbBackend, DbErr, Statement};
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 use utoipa::ToSchema;
 use uuid::Uuid;
 
-use crate::auth::extract::AuthSession;
-use crate::entities::push_devices;
-use crate::messaging::error::ApiError;
-use crate::state::AppState;
+use super::web::{conflict, internal};
+use crate::auth::Person;
+use crate::AppState;
 
 /// A phone unseen this long (its app not opened) is forgotten.
 const STALE_DAYS: i64 = 60;
@@ -46,6 +43,14 @@ pub struct DeviceToken {
     pub token: String,
 }
 
+/// A phone, as stored.
+#[derive(Debug, Clone)]
+pub struct Device {
+    pub id: Uuid,
+    pub platform: String,
+    pub token: String,
+}
+
 /// Whether `token` looks like what `platform`'s vendor hands out: hex from Apple, a short
 /// alphabet from Google. Checked here so the relay is never asked about anything else.
 pub fn plausible(platform: &str, token: &str) -> bool {
@@ -61,86 +66,85 @@ pub fn plausible(platform: &str, token: &str) -> bool {
     }
 }
 
-/// `PUT /api/v1/push/devices`: remember this phone for the caller, or refresh it.
+/// Remember this phone for the person, or refresh it.
 ///
 /// Keyed by token: the same phone registering again refreshes its row, and a phone someone else
 /// signed in on is handed to the caller rather than waking two accounts.
 #[utoipa::path(
     put,
-    path = "/api/v1/push/devices",
-    tag = "notifications",
+    path = "/api/v1/me/push/devices",
+    tag = "push",
     request_body = DeviceRequest,
     responses(
         (status = 204, description = "Phone remembered"),
-        (status = 400, description = "Not a device token"),
-        (status = 409, description = "Notifications to phones are off on this instance")
+        (status = 400, description = "Not a device token (`reason`: `token`)"),
+        (status = 409, description = "The instance has no relay (`reason`: `no_relay`)")
     )
 )]
 pub async fn register(
     State(state): State<AppState>,
-    session: AuthSession,
+    person: Person,
     Json(body): Json<DeviceRequest>,
-) -> Result<StatusCode, ApiError> {
-    let settings = crate::admin::instance_settings(&state.db).await?;
-    if !settings.web_push_enabled || state.config.push_relay_url.is_none() {
-        return Err(ApiError::Conflict(
-            "notifications to phones are off on this instance",
-        ));
+) -> Result<StatusCode, Problem> {
+    if state.config.push_relay_url.is_none() {
+        return Err(conflict("no_relay"));
     }
     if !plausible(&body.platform, &body.token) {
-        return Err(ApiError::BadRequest("not a device token"));
+        return Err(Problem::bad_request().with_reason("token"));
     }
-    let now = OffsetDateTime::now_utc();
-    push_devices::Entity::insert(push_devices::ActiveModel {
-        id: Set(Uuid::new_v4()),
-        user_id: Set(session.user_id),
-        platform: Set(body.platform),
-        token: Set(body.token),
-        created_at: Set(now),
-        last_seen_at: Set(now),
-    })
-    .on_conflict(
-        OnConflict::column(push_devices::Column::Token)
-            .update_columns([
-                push_devices::Column::UserId,
-                push_devices::Column::Platform,
-                push_devices::Column::LastSeenAt,
-            ])
-            .to_owned(),
-    )
-    .exec(&state.db)
-    .await?;
+    state
+        .db
+        .execute_raw(Statement::from_sql_and_values(
+            DbBackend::Postgres,
+            "INSERT INTO push_devices (id, account_id, platform, token) VALUES ($1, $2, $3, $4) \
+             ON CONFLICT (token) DO UPDATE SET account_id = EXCLUDED.account_id, \
+             platform = EXCLUDED.platform, last_seen_at = now()",
+            [
+                Uuid::new_v4().into(),
+                person.account.into(),
+                body.platform.into(),
+                body.token.into(),
+            ],
+        ))
+        .await
+        .map_err(internal)?;
     Ok(StatusCode::NO_CONTENT)
 }
 
-/// `DELETE /api/v1/push/devices`: forget this phone (the app signing out). Idempotent, and only
-/// ever the caller's own.
+/// Forget this phone (the app signing out). Idempotent, and only ever the person's own.
 #[utoipa::path(
     delete,
-    path = "/api/v1/push/devices",
-    tag = "notifications",
+    path = "/api/v1/me/push/devices",
+    tag = "push",
     request_body = DeviceToken,
     responses((status = 204, description = "Forgotten (or was not known)"))
 )]
 pub async fn unregister(
     State(state): State<AppState>,
-    session: AuthSession,
+    person: Person,
     Json(body): Json<DeviceToken>,
-) -> Result<StatusCode, ApiError> {
-    push_devices::Entity::delete_many()
-        .filter(push_devices::Column::Token.eq(body.token))
-        .filter(push_devices::Column::UserId.eq(session.user_id))
-        .exec(&state.db)
-        .await?;
+) -> Result<StatusCode, Problem> {
+    state
+        .db
+        .execute_raw(Statement::from_sql_and_values(
+            DbBackend::Postgres,
+            "DELETE FROM push_devices WHERE token = $1 AND account_id = $2",
+            [body.token.into(), person.account.into()],
+        ))
+        .await
+        .map_err(internal)?;
     Ok(StatusCode::NO_CONTENT)
 }
 
-/// Forget every phone of an account, when all its sessions end (signing out everywhere, a new
-/// password): a phone that is signed out must not keep being woken.
-pub async fn forget_user(db: &DatabaseConnection, user_id: Uuid) {
-    if let Err(error) = push_devices::Entity::delete_many()
-        .filter(push_devices::Column::UserId.eq(user_id))
-        .exec(db)
+/// Forget every phone of an account, when all its sessions end (signing out everywhere): a phone
+/// that is signed out must not keep being woken.
+pub async fn forget_account(db: &impl ConnectionTrait, account: Uuid) {
+    if let Err(error) = db
+        .execute_raw(Statement::from_sql_and_values(
+            DbBackend::Postgres,
+            "DELETE FROM push_devices WHERE account_id = $1",
+            [account.into()],
+        ))
         .await
     {
         tracing::warn!(%error, "could not forget an account's phones");
@@ -149,114 +153,79 @@ pub async fn forget_user(db: &DatabaseConnection, user_id: Uuid) {
 
 /// The phones of an account worth waking, forgetting those unseen for too long.
 pub async fn devices(
-    db: &DatabaseConnection,
-    user_id: Uuid,
+    db: &impl ConnectionTrait,
+    account: Uuid,
     now: OffsetDateTime,
-) -> Result<Vec<push_devices::Model>, ApiError> {
+) -> Result<Vec<Device>, DbErr> {
     let floor = now - time::Duration::days(STALE_DAYS);
-    push_devices::Entity::delete_many()
-        .filter(push_devices::Column::UserId.eq(user_id))
-        .filter(push_devices::Column::LastSeenAt.lt(floor))
-        .exec(db)
+    db.execute_raw(Statement::from_sql_and_values(
+        DbBackend::Postgres,
+        "DELETE FROM push_devices WHERE account_id = $1 AND last_seen_at < $2",
+        [account.into(), floor.into()],
+    ))
+    .await?;
+    let rows = db
+        .query_all_raw(Statement::from_sql_and_values(
+            DbBackend::Postgres,
+            "SELECT id, platform, token FROM push_devices WHERE account_id = $1",
+            [account.into()],
+        ))
         .await?;
-    Ok(push_devices::Entity::find()
-        .filter(push_devices::Column::UserId.eq(user_id))
-        .all(db)
-        .await?)
+    rows.iter()
+        .map(|row| {
+            Ok(Device {
+                id: row.try_get("", "id")?,
+                platform: row.try_get("", "platform")?,
+                token: row.try_get("", "token")?,
+            })
+        })
+        .collect()
 }
 
 /// What a phone test reached.
 #[derive(Debug, Serialize, ToSchema)]
-pub struct PhoneTestDto {
-    /// How many of the caller's phones were woken.
+pub struct PhoneTest {
+    /// How many of the person's phones were woken.
     pub devices: usize,
 }
 
-/// `POST /api/v1/push/devices/test`: wake each of the caller's phones with the test notification.
+/// Wake each of the person's phones with the test notification.
 ///
-/// The phones' counterpart of [`super::push::test`], through the same chain as a real notification:
-/// the relay, the phone waking up, and the phone asking `GET /api/v1/push/pending`, which hands it
-/// the test once. Quiet hours and preferences do not apply: it was asked for.
+/// The phones' counterpart of [`super::web::test`], through the same chain as a real entry: the
+/// relay, the phone waking up, and the phone asking `GET /api/v1/me/push/pending`, which hands it the
+/// test once. Quiet hours and settings do not apply: it was asked for.
 #[utoipa::path(
     post,
-    path = "/api/v1/push/devices/test",
-    tag = "notifications",
+    path = "/api/v1/me/push/devices/test",
+    tag = "push",
     responses(
-        (status = 200, description = "Woken", body = PhoneTestDto),
-        (status = 409, description = "Notifications are off, no relay, no phone registered, or a test was just sent")
+        (status = 200, description = "Woken", body = PhoneTest),
+        (status = 409, description = "Refused (`reason`: `no_relay`, `no_phone`, `test_just_sent`)")
     )
 )]
 pub async fn test(
     State(state): State<AppState>,
-    session: AuthSession,
-) -> Result<Json<PhoneTestDto>, ApiError> {
-    let settings = crate::admin::instance_settings(&state.db).await?;
-    if !settings.web_push_enabled {
-        return Err(ApiError::Conflict(
-            "notifications past the open app are turned off on this instance",
-        ));
-    }
+    person: Person,
+) -> Result<Json<PhoneTest>, Problem> {
     if state.config.push_relay_url.is_none() {
-        return Err(ApiError::Conflict("this instance has no push relay"));
+        return Err(conflict("no_relay"));
     }
-    let now = OffsetDateTime::now_utc();
-    let phones = devices(&state.db, session.user_id, now).await?;
+    let phones = devices(&state.db, person.account, OffsetDateTime::now_utc())
+        .await
+        .map_err(internal)?;
     if phones.is_empty() {
-        return Err(ApiError::Conflict(
-            "no phone is registered for this account",
-        ));
+        return Err(conflict("no_phone"));
     }
-    // The browsers' throttle, shared: one test every few seconds, whichever way it was asked.
-    let throttle: Option<String> = state
-        .hub
-        .valkey()
-        .set(
-            format!("push:test-throttle:{}", session.user_id),
-            "1",
-            Some(Expiration::EX(5)),
-            Some(SetOptions::NX),
-            false,
-        )
-        .await
-        .map_err(|_| ApiError::Internal)?;
-    if throttle.is_none() {
-        return Err(ApiError::Conflict("a test was just sent"));
-    }
-    let _: () = state
-        .hub
-        .valkey()
-        .set(
-            super::push::test_key(session.user_id),
-            "1",
-            Some(Expiration::EX(super::push::TEST_TTL_SECS)),
-            None,
-            false,
-        )
-        .await
-        .map_err(|_| ApiError::Internal)?;
+    super::web::arm_test(&state, person.account).await?;
     let count = phones.len();
     for phone in phones {
         wake(&state, phone).await;
     }
-    Ok(Json(PhoneTestDto { devices: count }))
-}
-
-/// The shared HTTP client for the relay: rustls with `ring`, a short timeout, every status handed
-/// back.
-fn agent() -> &'static ureq::Agent {
-    static AGENT: OnceLock<ureq::Agent> = OnceLock::new();
-    AGENT.get_or_init(|| {
-        ureq::Agent::config_builder()
-            .timeout_global(Some(Duration::from_secs(15)))
-            .http_status_as_error(false)
-            .max_redirects(0)
-            .build()
-            .into()
-    })
+    Ok(Json(PhoneTest { devices: count }))
 }
 
 /// Wake one phone through the relay; a phone the vendor says is gone is forgotten.
-pub async fn wake(state: &AppState, device: push_devices::Model) {
+pub async fn wake(state: &AppState, device: Device) {
     ask_relay(state, device, "/v1/send").await;
 }
 
@@ -264,19 +233,17 @@ pub async fn wake(state: &AppState, device: push_devices::Model) {
 /// "mark all read") costs one silent push, sent once the burst is over.
 const SYNC_WINDOW_SECS: u64 = 3;
 
-/// Some of the person's notifications were read: in a few seconds, tell each of their phones,
-/// silently, to count again and clear the read ones from the screen (ADR 0006). Reads within the
-/// window ride on the push already planned. Nothing is sent when the administrator turned pushes
-/// off or the instance has no relay.
-pub async fn sync_soon(state: &AppState, user_id: Uuid) {
+/// Some of the person's entries were read: in a few seconds, tell each of their phones, silently, to
+/// count again and clear the read ones from the screen (ADR 0006). Reads within the window ride on
+/// the push already planned. Nothing is sent when the instance has no relay.
+pub async fn sync_soon(state: &AppState, account: Uuid) {
     if state.config.push_relay_url.is_none() {
         return;
     }
     let planned: Result<Option<String>, _> = state
-        .hub
-        .valkey()
+        .valkey
         .set(
-            format!("push:sync:{user_id}"),
+            format!("push:sync:{account}"),
             "1",
             Some(Expiration::EX(SYNC_WINDOW_SECS as i64)),
             Some(SetOptions::NX),
@@ -290,17 +257,10 @@ pub async fn sync_soon(state: &AppState, user_id: Uuid) {
     let state = state.clone();
     tokio::spawn(async move {
         tokio::time::sleep(Duration::from_secs(SYNC_WINDOW_SECS)).await;
-        let enabled = crate::admin::instance_settings(&state.db)
-            .await
-            .map(|settings| settings.web_push_enabled)
-            .unwrap_or(false);
-        if !enabled {
-            return;
-        }
-        let phones = match devices(&state.db, user_id, OffsetDateTime::now_utc()).await {
+        let phones = match devices(&state.db, account, OffsetDateTime::now_utc()).await {
             Ok(phones) => phones,
             Err(error) => {
-                tracing::warn!(?error, "could not list the phones to sync");
+                tracing::warn!(%error, "could not list the phones to sync");
                 return;
             }
         };
@@ -311,40 +271,44 @@ pub async fn sync_soon(state: &AppState, user_id: Uuid) {
 }
 
 /// Post a device to one of the relay's routes; a phone the vendor says is gone is forgotten.
-async fn ask_relay(state: &AppState, device: push_devices::Model, route: &'static str) {
-    let Some(relay) = state.config.push_relay_url.clone() else {
+async fn ask_relay(state: &AppState, device: Device, route: &'static str) {
+    let Some(relay) = &state.config.push_relay_url else {
         return;
     };
-    let body =
-        serde_json::json!({ "platform": device.platform, "token": device.token }).to_string();
-    let result = tokio::task::spawn_blocking(move || {
-        agent()
-            .post(&format!("{relay}{route}"))
-            .header("Content-Type", "application/json")
-            .send(body.as_bytes())
-            .map(|response| response.status().as_u16())
-    })
-    .await;
-    match result {
-        Ok(Ok(200..=299)) => {}
-        Ok(Ok(410)) => {
+    let sent = state
+        .push
+        .http
+        .post(format!("{relay}{route}"))
+        .json(&serde_json::json!({ "platform": device.platform, "token": device.token }))
+        .timeout(Duration::from_secs(15))
+        .send()
+        .await;
+    match sent.map(|response| response.status().as_u16()) {
+        Ok(200..=299) => {}
+        Ok(410) => {
             tracing::info!(device = %device.id, "phone gone; forgotten");
-            if let Err(error) = push_devices::Entity::delete_by_id(device.id)
-                .exec(&state.db)
+            if let Err(error) = state
+                .db
+                .execute_raw(Statement::from_sql_and_values(
+                    DbBackend::Postgres,
+                    "DELETE FROM push_devices WHERE id = $1",
+                    [device.id.into()],
+                ))
                 .await
             {
                 tracing::warn!(%error, "could not forget a phone");
             }
         }
         // A relay older than the sync push: the count catches up at the next notification.
-        Ok(Ok(404)) if route == "/v1/sync" => {
+        Ok(404) if route == "/v1/sync" => {
             tracing::debug!("the push relay does not sync yet");
         }
-        Ok(Ok(status)) => {
+        Ok(status) => {
             tracing::warn!(status, device = %device.id, route, "the push relay refused")
         }
-        Ok(Err(error)) => tracing::warn!(%error, "could not reach the push relay"),
-        Err(error) => tracing::warn!(%error, "push relay task failed"),
+        Err(error) => {
+            tracing::warn!(error = %error.without_url(), "could not reach the push relay")
+        }
     }
 }
 

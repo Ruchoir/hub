@@ -3,7 +3,7 @@
 //! Ruchoir's pushes say nothing: the service worker fetches what to draw from the API. They were
 //! first sent with no body at all, which RFC 8030 allows. While chasing Apple's refusals, each push
 //! was given a body instead, the form every push service handles (a body must be encrypted for the
-//! subscription). The refusal itself turned out to be the `Topic` header (see `push.rs`), but the
+//! subscription). The refusal itself turned out to be the `Topic` header (see `web.rs`), but the
 //! body stays: it costs nothing and removes one way for a service to treat our pushes differently.
 //! What is encrypted is a fixed marker ([`WAKE`]), the same for every push: the vendor still learns
 //! nothing beyond "something happened", which is what ADR 0001 promises.
@@ -141,7 +141,7 @@ pub fn encrypt(plaintext: &[u8], p256dh: &str, auth: &str) -> Option<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::notify::vapid::base64url;
+    use crate::push::vapid::base64url;
 
     /// The receiving side, as a browser runs it, to check the sender against.
     fn decrypt(body: &[u8], ua_secret: &SecretKey, auth: &[u8]) -> Vec<u8> {

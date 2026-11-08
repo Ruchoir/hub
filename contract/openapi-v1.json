@@ -48,6 +48,36 @@
         },
         "type": "object"
       },
+      "DeviceRequest": {
+        "description": "A phone, as its app registers it.",
+        "properties": {
+          "platform": {
+            "description": "`ios` or `android`.",
+            "type": "string"
+          },
+          "token": {
+            "description": "The device token Apple or Google handed the app.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "platform",
+          "token"
+        ],
+        "type": "object"
+      },
+      "DeviceToken": {
+        "description": "A phone to forget.",
+        "properties": {
+          "token": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "token"
+        ],
+        "type": "object"
+      },
       "Entry": {
         "description": "One entry, as its reader sees it.",
         "properties": {
@@ -292,6 +322,41 @@
         ],
         "type": "object"
       },
+      "Pending": {
+        "description": "What a wake-up draws.",
+        "properties": {
+          "items": {
+            "description": "Newest first, at most a handful.",
+            "items": {
+              "$ref": "#/components/schemas/PushItem"
+            },
+            "type": "array"
+          },
+          "silent": {
+            "description": "Whether to draw them without a sound (the person's own setting).",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "silent",
+          "items"
+        ],
+        "type": "object"
+      },
+      "PhoneTest": {
+        "description": "What a phone test reached.",
+        "properties": {
+          "devices": {
+            "description": "How many of the person's phones were woken.",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "devices"
+        ],
+        "type": "object"
+      },
       "ProductDescription": {
         "description": "The description of a Ruchoir product or service.",
         "properties": {
@@ -407,6 +472,94 @@
         ],
         "type": "object"
       },
+      "PushConfig": {
+        "description": "Whether the instance offers Web Push, and the key a browser subscribes against.",
+        "properties": {
+          "available": {
+            "description": "False when the instance has no VAPID key.",
+            "type": "boolean"
+          },
+          "public_key": {
+            "description": "The VAPID public key (`applicationServerKey`), base64url. Absent when not available.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "available"
+        ],
+        "type": "object"
+      },
+      "PushItem": {
+        "description": "One entry, worded for a tray or a lock screen.",
+        "properties": {
+          "body": {
+            "type": "string"
+          },
+          "category": {
+            "type": "string"
+          },
+          "created_at": {
+            "description": "RFC 3339.",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "link": {
+            "description": "Where a tap leads; absent for the test.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "product": {
+            "description": "The product that published it (`chat`); absent for the test.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "category",
+          "title",
+          "body",
+          "created_at"
+        ],
+        "type": "object"
+      },
+      "PushTest": {
+        "description": "What a test push did.",
+        "properties": {
+          "delivered": {
+            "description": "How many of those the push services accepted the test for.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "subscriptions": {
+            "description": "How many of the person's browsers are subscribed.",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "subscriptions",
+          "delivered"
+        ],
+        "type": "object"
+      },
       "Readiness": {
         "description": "Readiness, with what each store answered.",
         "properties": {
@@ -445,6 +598,45 @@
         ],
         "type": "object"
       },
+      "Subscription": {
+        "description": "A browser's subscription, as `PushSubscription.toJSON()` lays it out.",
+        "properties": {
+          "endpoint": {
+            "type": "string"
+          },
+          "keys": {
+            "$ref": "#/components/schemas/SubscriptionKeys"
+          },
+          "user_agent": {
+            "description": "The browser, as its product read its `User-Agent`, shown in the person's device list.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "endpoint",
+          "keys"
+        ],
+        "type": "object"
+      },
+      "SubscriptionKeys": {
+        "description": "A browser's subscription keys, as `PushSubscription.toJSON()` lays them out.",
+        "properties": {
+          "auth": {
+            "type": "string"
+          },
+          "p256dh": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "p256dh",
+          "auth"
+        ],
+        "type": "object"
+      },
       "Ticket": {
         "description": "A new ticket.",
         "properties": {
@@ -460,6 +652,18 @@
         "required": [
           "ticket",
           "expires_in"
+        ],
+        "type": "object"
+      },
+      "Unsubscription": {
+        "description": "A subscription to forget, named by its endpoint.",
+        "properties": {
+          "endpoint": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "endpoint"
         ],
         "type": "object"
       }
@@ -1018,6 +1222,210 @@
         ]
       }
     },
+    "/api/v1/me/push/devices": {
+      "delete": {
+        "operationId": "unregister",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeviceToken"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Forgotten (or was not known)"
+          }
+        },
+        "summary": "Forget this phone (the app signing out). Idempotent, and only ever the person's own.",
+        "tags": [
+          "push"
+        ]
+      },
+      "put": {
+        "description": "Keyed by token: the same phone registering again refreshes its row, and a phone someone else\nsigned in on is handed to the caller rather than waking two accounts.",
+        "operationId": "register",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeviceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Phone remembered"
+          },
+          "400": {
+            "description": "Not a device token (`reason`: `token`)"
+          },
+          "409": {
+            "description": "The instance has no relay (`reason`: `no_relay`)"
+          }
+        },
+        "summary": "Remember this phone for the person, or refresh it.",
+        "tags": [
+          "push"
+        ]
+      }
+    },
+    "/api/v1/me/push/devices/test": {
+      "post": {
+        "description": "The phones' counterpart of [`super::web::test`], through the same chain as a real entry: the\nrelay, the phone waking up, and the phone asking `GET /api/v1/me/push/pending`, which hands it the\ntest once. Quiet hours and settings do not apply: it was asked for.",
+        "operationId": "test",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhoneTest"
+                }
+              }
+            },
+            "description": "Woken"
+          },
+          "409": {
+            "description": "Refused (`reason`: `no_relay`, `no_phone`, `test_just_sent`)"
+          }
+        },
+        "summary": "Wake each of the person's phones with the test notification.",
+        "tags": [
+          "push"
+        ]
+      }
+    },
+    "/api/v1/me/push/pending": {
+      "get": {
+        "description": "The same rule as the inbox ([`crate::prefs::allows`]), so what a setting silenced is not drawn\neven when something else woke the device, and only what is still unread: an entry opened on\nanother device in the meantime has nothing left to say.",
+        "operationId": "pending",
+        "parameters": [
+          {
+            "description": "Only entries created after this instant (RFC 3339): the newest one this device has already\nshown. Absent, the last ten minutes.",
+            "in": "query",
+            "name": "since",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "description": "The person's language, as their product knows it (`en`). Absent, the request's\n`Accept-Language`, then French.",
+            "in": "query",
+            "name": "locale",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Pending"
+                }
+              }
+            },
+            "description": "What to draw"
+          }
+        },
+        "summary": "What a woken service worker or phone should draw.",
+        "tags": [
+          "push"
+        ]
+      }
+    },
+    "/api/v1/me/push/subscription": {
+      "delete": {
+        "operationId": "unsubscribe",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Unsubscription"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Forgotten (or was not known)"
+          }
+        },
+        "summary": "Forget a browser's subscription. Idempotent, and only ever the person's own.",
+        "tags": [
+          "push"
+        ]
+      },
+      "put": {
+        "description": "Keyed by endpoint: the same browser subscribing again refreshes its row, and a browser someone\nelse signed in on is handed to the caller rather than notifying two accounts.",
+        "operationId": "subscribe",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Subscription"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Subscription stored"
+          },
+          "400": {
+            "description": "Not a push service this instance calls (`reason`: `endpoint`, `keys`)"
+          },
+          "409": {
+            "description": "The instance sends no Web Push (`reason`: `push_off`)"
+          }
+        },
+        "summary": "Remember a browser's subscription for the person.",
+        "tags": [
+          "push"
+        ]
+      }
+    },
+    "/api/v1/me/push/test": {
+      "post": {
+        "description": "The whole chain the entries take, on purpose: the hub, the vendor's push service, the service\nworker waking up and asking for what to draw. Quiet hours and settings do not apply: it was asked\nfor.",
+        "operationId": "test",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PushTest"
+                }
+              }
+            },
+            "description": "Sent"
+          },
+          "409": {
+            "description": "Refused (`reason`: `push_off`, `no_browser`, `test_just_sent`)"
+          }
+        },
+        "summary": "Send a real push to each of the person's subscribed browsers.",
+        "tags": [
+          "push"
+        ]
+      }
+    },
     "/api/v1/organisations/{id}/presence": {
       "get": {
         "operationId": "organisation",
@@ -1054,6 +1462,27 @@
         "summary": "The presence of an organisation's members, for one of them.",
         "tags": [
           "live"
+        ]
+      }
+    },
+    "/api/v1/push/config": {
+      "get": {
+        "operationId": "config",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PushConfig"
+                }
+              }
+            },
+            "description": "Web Push availability"
+          }
+        },
+        "summary": "Whether this instance sends Web Push, and with which key.",
+        "tags": [
+          "push"
         ]
       }
     },
@@ -1103,6 +1532,10 @@
     {
       "description": "What reaches a person, through which door, and when",
       "name": "preferences"
+    },
+    {
+      "description": "Browsers and phones woken when no page is open, and what they then show",
+      "name": "push"
     }
   ]
 }

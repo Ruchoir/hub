@@ -18,10 +18,13 @@ use sea_orm::DatabaseConnection;
 /// Applies the migrations once per test binary, so parallel tests never race two runners.
 static SCHEMA: tokio::sync::OnceCell<()> = tokio::sync::OnceCell::const_new();
 
-/// The settings of a test: the hub at `https://hub.example.org`, everything else by default.
+/// The settings of a test: the hub at `https://hub.example.org`, no phone relay (a test never
+/// calls out), everything else by default.
 pub fn config() -> Config {
-    Config::from_lookup(|name| {
-        (name == "HUB_PUBLIC_URL").then(|| "https://hub.example.org".to_owned())
+    Config::from_lookup(|name| match name {
+        "HUB_PUBLIC_URL" => Some("https://hub.example.org".to_owned()),
+        "HUB_PUSH_RELAY_URL" => Some(String::new()),
+        _ => None,
     })
     .expect("test configuration")
 }
@@ -40,6 +43,8 @@ pub fn offline_state() -> AppState {
         fanout: hub::live::Fanout::detached(valkey.clone()),
         event_keys: hub::events::EventKeys::fixed(ruchoir_events::signature::PublicKeys::new()),
         replica: None,
+        propolis: None,
+        push: Arc::new(hub::push::Push::without_vapid()),
         valkey,
         verifier: None,
     }
@@ -86,6 +91,8 @@ pub async fn online_state() -> Option<AppState> {
         fanout: hub::live::Fanout::detached(valkey.clone()),
         event_keys: hub::events::EventKeys::fixed(ruchoir_events::signature::PublicKeys::new()),
         replica: None,
+        propolis: None,
+        push: Arc::new(hub::push::Push::without_vapid()),
         valkey,
         verifier: None,
     })

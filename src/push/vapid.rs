@@ -1,27 +1,20 @@
 //! The instance's VAPID identity (RFC 8292): the key pair a push service uses to recognise pushes
-//! as coming from this server.
+//! as coming from this hub.
 //!
 //! A browser subscribes against a public key (`applicationServerKey`), and the push service then
 //! accepts pushes for that subscription only when they carry a token signed with the matching private
-//! key. The pair is therefore generated once per instance, on first use, and kept: replacing it
-//! silently invalidates every subscription.
+//! key. The pair is therefore made once per instance and kept: replacing it silently invalidates
+//! every subscription.
 //!
-//! The private half is a P-256 scalar, stored encrypted with the instance's secret key like the TOTP
-//! secrets. If it can no longer be decrypted (the secret key was changed), a new pair is generated
-//! and every subscription is dropped, since the push services would refuse them all anyway; each
-//! browser subscribes again the next time the app is opened.
+//! The installer generates the private key (P-256, PKCS#8 PEM) next to the instance's other keys and
+//! hands the hub its path (`HUB_VAPID_KEY`), as it does the hub's client key: the hub has no secret to
+//! encrypt it with, and a key file the operator backs up with the others outlives the database.
 
 use p256::ecdsa::signature::Signer;
 use p256::ecdsa::{Signature, SigningKey};
-use sea_orm::sea_query::Expr;
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+use p256::pkcs8::DecodePrivateKey;
 use serde::Serialize;
 use time::OffsetDateTime;
-
-use crate::auth::crypto;
-use crate::entities::{instance_settings, push_subscriptions};
-use crate::messaging::error::ApiError;
-use crate::state::AppState;
 
 /// How long a signed token stays valid. RFC 8292 caps it at a day; Apple refuses more than an hour.
 const TOKEN_TTL_SECS: i64 = 60 * 60;
@@ -59,98 +52,23 @@ fn public_key_of(signing: &SigningKey) -> String {
     base64url(signing.verifying_key().to_sec1_point(false).as_bytes())
 }
 
-/// Draw a fresh private key from the operating system's CSPRNG.
-fn generate() -> Result<SigningKey, ApiError> {
-    // A random 32-byte string is a valid P-256 scalar unless it is zero or above the group order,
-    // which happens with a probability around 2^-32: retrying is the standard answer.
-    loop {
-        let mut bytes = zeroize::Zeroizing::new([0u8; 32]);
-        getrandom::fill(bytes.as_mut()).map_err(|_| ApiError::Internal)?;
-        if let Ok(key) = SigningKey::from_slice(bytes.as_ref()) {
-            return Ok(key);
-        }
+impl VapidKeys {
+    /// The key pair from its PEM text (PKCS#8, as the installer writes it).
+    pub fn from_pem(pem: &str) -> Result<Self, String> {
+        let signing =
+            SigningKey::from_pkcs8_pem(pem).map_err(|e| format!("not a P-256 key: {e}"))?;
+        Ok(Self {
+            public_key: public_key_of(&signing),
+            signing,
+        })
     }
-}
 
-/// Read the instance's key pair, generating and storing it on first use.
-pub async fn keys(state: &AppState) -> Result<VapidKeys, ApiError> {
-    for _ in 0..2 {
-        let settings = crate::admin::instance_settings(&state.db).await?;
-        if let (Some(public_key), Some(ciphertext), Some(nonce)) = (
-            settings.vapid_public_key.clone(),
-            settings.vapid_private_key.as_deref(),
-            settings.vapid_private_nonce.as_deref(),
-        ) {
-            let decrypted = crypto::decrypt(&state.secret_key, ciphertext, nonce)
-                .ok()
-                .and_then(|plain| SigningKey::from_slice(&plain).ok());
-            if let Some(signing) = decrypted {
-                return Ok(VapidKeys {
-                    signing,
-                    public_key,
-                });
-            }
-            tracing::warn!(
-                "the VAPID key can no longer be decrypted (was RUCHOIR_SECRET_ENCRYPTION_KEY \
-                 changed?); generating a new pair and dropping every push subscription"
-            );
-            return replace(state).await;
-        }
-
-        // First use. Written only if nobody else wrote one in the meantime (two API processes
-        // starting together), then read back, so every process ends up signing with the same key.
-        let signing = generate()?;
-        let (ciphertext, nonce) = crypto::encrypt(&state.secret_key, &signing.to_bytes())
-            .map_err(|_| ApiError::Internal)?;
-        instance_settings::Entity::update_many()
-            .col_expr(
-                instance_settings::Column::VapidPublicKey,
-                Expr::value(public_key_of(&signing)),
-            )
-            .col_expr(
-                instance_settings::Column::VapidPrivateKey,
-                Expr::value(ciphertext),
-            )
-            .col_expr(
-                instance_settings::Column::VapidPrivateNonce,
-                Expr::value(nonce),
-            )
-            .filter(instance_settings::Column::VapidPrivateKey.is_null())
-            .exec(&state.db)
-            .await?;
-        tracing::info!("generated the instance's VAPID key pair for Web Push");
+    /// The key pair from the file `HUB_VAPID_KEY` names.
+    pub fn read(path: &std::path::Path) -> Result<Self, String> {
+        let pem = std::fs::read_to_string(path)
+            .map_err(|error| format!("cannot read {}: {error}", path.display()))?;
+        Self::from_pem(&pem).map_err(|error| format!("{}: {error}", path.display()))
     }
-    Err(ApiError::Internal)
-}
-
-/// Replace an undecryptable key pair, dropping the subscriptions made against it.
-async fn replace(state: &AppState) -> Result<VapidKeys, ApiError> {
-    let signing = generate()?;
-    let public_key = public_key_of(&signing);
-    let (ciphertext, nonce) =
-        crypto::encrypt(&state.secret_key, &signing.to_bytes()).map_err(|_| ApiError::Internal)?;
-    instance_settings::Entity::update_many()
-        .col_expr(
-            instance_settings::Column::VapidPublicKey,
-            Expr::value(public_key.clone()),
-        )
-        .col_expr(
-            instance_settings::Column::VapidPrivateKey,
-            Expr::value(ciphertext),
-        )
-        .col_expr(
-            instance_settings::Column::VapidPrivateNonce,
-            Expr::value(nonce),
-        )
-        .exec(&state.db)
-        .await?;
-    push_subscriptions::Entity::delete_many()
-        .exec(&state.db)
-        .await?;
-    Ok(VapidKeys {
-        signing,
-        public_key,
-    })
 }
 
 #[derive(Serialize)]
@@ -204,9 +122,34 @@ mod tests {
         assert_eq!(base64url(&[0xfb, 0xff]), "-_8");
     }
 
+    /// A fixed test key (RFC 6979, appendix A.2.5), in PKCS#8 PEM.
+    fn test_keys() -> VapidKeys {
+        use p256::pkcs8::EncodePrivateKey;
+        let scalar = [
+            0xc9, 0xaf, 0xa9, 0xd8, 0x45, 0xba, 0x75, 0x16, 0x6b, 0x5c, 0x21, 0x57, 0x67, 0xb1,
+            0xd6, 0x93, 0x4e, 0x50, 0xc3, 0xdb, 0x36, 0xe8, 0x9b, 0x12, 0x7b, 0x8a, 0x62, 0x2b,
+            0x12, 0x0f, 0x67, 0x21,
+        ];
+        let signing = SigningKey::from_slice(&scalar).unwrap();
+        let pem = signing.to_pkcs8_pem(Default::default()).unwrap();
+        VapidKeys::from_pem(&pem).unwrap()
+    }
+
+    #[test]
+    fn a_key_file_that_is_not_a_p256_key_is_refused() {
+        assert!(VapidKeys::from_pem(
+            "-----BEGIN PRIVATE KEY-----
+AAAA
+-----END PRIVATE KEY-----
+"
+        )
+        .is_err());
+        assert!(VapidKeys::from_pem("").is_err());
+    }
+
     #[test]
     fn the_public_key_is_an_uncompressed_point() {
-        let signing = generate().unwrap();
+        let signing = test_keys().signing;
         // 65 bytes (0x04, x, y) encode to 87 characters without padding.
         let public = public_key_of(&signing);
         assert_eq!(public.len(), 87);
@@ -215,11 +158,7 @@ mod tests {
 
     #[test]
     fn the_token_verifies_against_the_announced_key() {
-        let signing = generate().unwrap();
-        let keys = VapidKeys {
-            public_key: public_key_of(&signing),
-            signing,
-        };
+        let keys = test_keys();
         let header = keys.authorization(
             "https://push.example",
             "mailto:admin@example.org",

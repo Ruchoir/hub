@@ -50,7 +50,7 @@ In the monolith (`apps/api/src`):
 | Hub | From | Changes |
 |---|---|---|
 | `inbox` | `notifications` | No foreign key to a product. An entry carries what its product published (section 3), and refers to the product's object by an opaque id and a link |
-| `push_subscriptions`, `push_devices`, the VAPID keys | the same tables, `instance_settings` | Unchanged |
+| `push_subscriptions`, `push_devices`, the VAPID key | the same tables, `instance_settings` | The tables unchanged. The VAPID key is a file the installer generates, like the hub's client key, rather than a row encrypted with a secret the hub does not have |
 | `notification_settings` | the notification part of `user_preferences`, `space_notification_prefs` | An account's settings and its level per organisation |
 | presence | `presence:<id>` keys, `users.manual_presence` | Unchanged; the manual choice moves from Propolis's `users` to the hub |
 | `organisation_members` | (none) | A replica of who belongs to which organisation, from Propolis's events, so that presence reaches the right people (section 5) |

@@ -44,11 +44,28 @@ pub const SUBSCRIPTIONS: &str = "HUB_SUBSCRIPTIONS";
 pub const CLIENT_KEY: &str = "HUB_CLIENT_KEY";
 /// The id under which that key is registered with Propolis.
 pub const CLIENT_KEY_ID: &str = "HUB_CLIENT_KEY_ID";
+/// The instance's VAPID key (RFC 8292), a P-256 private key in PEM (PKCS#8) the installer generated
+/// and keeps: the key browsers subscribe against. Unset: no web push.
+pub const VAPID_KEY: &str = "HUB_VAPID_KEY";
+/// The push services the hub may call, by host or parent domain, comma-separated: an endpoint is a
+/// URL the browser chose, so anything else is refused (the browsers' own services by default).
+pub const PUSH_HOSTS: &str = "HUB_PUSH_HOSTS";
+/// The publisher's relay that wakes the phone apps (ADR 0006). Empty: no phone is woken.
+pub const PUSH_RELAY_URL: &str = "HUB_PUSH_RELAY_URL";
+/// How long an entry waits unread before it goes into a mail digest, in seconds (15 minutes by
+/// default); `0` turns the digest off.
+pub const DIGEST_DELAY_SECS: &str = "HUB_DIGEST_DELAY_SECS";
 
 const DEFAULT_LISTEN: &str = "127.0.0.1:8080";
 const DEFAULT_PUBLIC_URL: &str = "http://localhost:8080";
 const DEFAULT_DATABASE_URL: &str = "postgres://hub:hub@localhost:5432/hub";
 const DEFAULT_VALKEY_URL: &str = "redis://localhost:6379";
+/// The browsers' own push services: Google's (Chrome, Edge on Android), Mozilla's, Apple's and
+/// Microsoft's. The instance does not choose them: each browser brings its vendor's (ADR 0001).
+pub const DEFAULT_PUSH_HOSTS: &str =
+    "fcm.googleapis.com,push.services.mozilla.com,push.apple.com,notify.windows.com";
+/// The publisher's relay (ADR 0006).
+pub const DEFAULT_PUSH_RELAY_URL: &str = "https://ruchoir.com/push";
 
 /// The settings of a running the hub. Its `Debug` output leaves out the stores' addresses, which
 /// hold passwords.
@@ -80,6 +97,14 @@ pub struct Config {
     pub subscriptions: Option<std::path::PathBuf>,
     /// The hub's client key file and its key id, when it reads Propolis's change feed.
     pub client_key: Option<(std::path::PathBuf, String)>,
+    /// The VAPID key file, when the hub sends web push.
+    pub vapid_key: Option<std::path::PathBuf>,
+    /// The push services it may call.
+    pub push_hosts: Vec<String>,
+    /// The phones' relay, without a trailing slash.
+    pub push_relay_url: Option<String>,
+    /// How long an entry waits before the digest, in seconds; `0` for no digest.
+    pub digest_delay_secs: i64,
 }
 
 impl Config {
@@ -153,6 +178,40 @@ impl Config {
                     Some((std::path::PathBuf::from(path), kid.trim().to_owned()))
                 }
                 _ => None,
+            },
+            vapid_key: lookup(VAPID_KEY)
+                .filter(|v| !v.trim().is_empty())
+                .map(std::path::PathBuf::from),
+            push_hosts: lookup(PUSH_HOSTS)
+                .unwrap_or_else(|| DEFAULT_PUSH_HOSTS.to_owned())
+                .split(',')
+                .map(|h| h.trim().trim_start_matches('.').to_ascii_lowercase())
+                .filter(|h| !h.is_empty())
+                .collect(),
+            push_relay_url: match lookup(PUSH_RELAY_URL)
+                .unwrap_or_else(|| DEFAULT_PUSH_RELAY_URL.to_owned())
+                .trim()
+            {
+                "" => None,
+                url if url.starts_with("https://") || url.starts_with("http://") => {
+                    Some(url.trim_end_matches('/').to_owned())
+                }
+                _ => {
+                    return Err(ConfigError::new(
+                        PUSH_RELAY_URL,
+                        "an http or https URL, or empty",
+                    ))
+                }
+            },
+            digest_delay_secs: match lookup(DIGEST_DELAY_SECS) {
+                None => 900,
+                Some(text) => text
+                    .parse::<i64>()
+                    .ok()
+                    .filter(|secs| *secs >= 0)
+                    .ok_or_else(|| {
+                        ConfigError::new(DIGEST_DELAY_SECS, "a whole number of seconds")
+                    })?,
             },
         })
     }
@@ -236,6 +295,36 @@ mod tests {
             (10, 6)
         );
         assert!(config.auto_migrate);
+        assert!(config.vapid_key.is_none());
+        assert_eq!(config.push_hosts.len(), 4);
+        assert_eq!(
+            config.push_relay_url.as_deref(),
+            Some(DEFAULT_PUSH_RELAY_URL)
+        );
+        assert_eq!(config.digest_delay_secs, 900);
+    }
+
+    #[test]
+    fn push_and_the_digest_are_read_and_checked() {
+        let config = read(&[
+            (PUSH_HOSTS, " .push.example , other.example"),
+            (PUSH_RELAY_URL, "https://relay.example/push/"),
+            (DIGEST_DELAY_SECS, "0"),
+        ])
+        .unwrap();
+        assert_eq!(config.push_hosts, ["push.example", "other.example"]);
+        assert_eq!(
+            config.push_relay_url.as_deref(),
+            Some("https://relay.example/push")
+        );
+        assert_eq!(config.digest_delay_secs, 0);
+        assert!(read(&[(PUSH_RELAY_URL, "")])
+            .unwrap()
+            .push_relay_url
+            .is_none());
+        for (variable, value) in [(PUSH_RELAY_URL, "relay.example"), (DIGEST_DELAY_SECS, "-1")] {
+            assert_eq!(read(&[(variable, value)]).unwrap_err().variable, variable);
+        }
     }
 
     #[test]

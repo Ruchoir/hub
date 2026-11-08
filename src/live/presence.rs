@@ -98,7 +98,7 @@ pub async fn departed(state: &AppState, account: Uuid) {
     }
 }
 
-async fn choice_of(db: &impl ConnectionTrait, account: Uuid) -> Result<Option<String>, DbErr> {
+pub async fn choice_of(db: &impl ConnectionTrait, account: Uuid) -> Result<Option<String>, DbErr> {
     let row = db
         .query_one_raw(Statement::from_sql_and_values(
             DbBackend::Postgres,

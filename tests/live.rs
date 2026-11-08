@@ -58,6 +58,8 @@ async fn live() -> Option<Live> {
             .unwrap(),
         event_keys: hub::events::EventKeys::fixed(ruchoir_events::signature::PublicKeys::new()),
         replica: None,
+        propolis: None,
+        push: Arc::new(hub::push::Push::without_vapid()),
         config: Arc::new(config),
         db,
         valkey,
