@@ -23,11 +23,11 @@ path = "src/main.rs"
 
 [dependencies]
 # The shared HTTP layer of every Ruchoir service (Ruchoir/core), read from its release tag (ADR 0013).
-ruchoir-http = { git = "https://github.com/Ruchoir/core", tag = "v0.2.0" }
+ruchoir-http = { git = "https://github.com/Ruchoir/core", tag = "v0.3.0" }
 # The frame a product hands the hub and the hub pushes to clients (Ruchoir/core).
-ruchoir-events = { git = "https://github.com/Ruchoir/core", tag = "v0.2.0" }
+ruchoir-events = { git = "https://github.com/Ruchoir/core", tag = "v0.3.0" }
 # Propolis's access tokens checked as every product checks them, from the same core release.
-ruchoir-auth = { git = "https://github.com/Ruchoir/core", tag = "v0.2.0" }
+ruchoir-auth = { git = "https://github.com/Ruchoir/core", tag = "v0.3.0" }
 # The web framework every Ruchoir service is built on (tokio-rs community, MIT).
 axum = { version = "0.8", features = ["ws"] }
 # The async runtime: the listener, and the signals of a graceful shutdown (tokio-rs community, MIT).
@@ -86,7 +86,7 @@ aes-gcm = "0.11.1"
 tokio-tungstenite = "0.30"
 # Signing stand-in Propolis tokens in the tests (Frank Denis, France; ISC), as Propolis does.
 jwt-simple = { version = "0.15", default-features = false, features = ["pure-rust"] }
-ruchoir-contract = { git = "https://github.com/Ruchoir/core", tag = "v0.2.0" }
+ruchoir-contract = { git = "https://github.com/Ruchoir/core", tag = "v0.3.0" }
 # `oneshot` on the router, in the tests (tokio-rs community, MIT).
 tower = { version = "0.5", features = ["util"] }
 # Reading a response body in the tests (hyperium community, MIT).
