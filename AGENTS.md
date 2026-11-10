@@ -125,6 +125,8 @@ src/config.rs        Config::from_env(): the settings below
 src/db.rs, cache.rs  the PostgreSQL pool (SeaORM) and the Valkey pool (fred), from the monolith
 src/health.rs        /healthz (the process is up) and /api/v1/health (whether both stores answer)
 src/product.rs       /.well-known/ruchoir-product: name, version, API majors, FEATURES
+src/manifest.rs      /.well-known/ruchoir-manifest: the installer's manifest (HUB_MANIFEST), where apps and
+                     pages start their discovery
 src/auth.rs          who calls: Propolis's tokens for the hub, Publisher (a product with hub:publish)
                      and Person (a person, for what is theirs)
 src/inbox.rs         the inbox: POST /api/v1/inbox (a product publishes), /api/v1/me/inbox (a person
@@ -178,6 +180,7 @@ compose.yaml         PostgreSQL and Valkey for a development machine
 | `HUB_CLIENT_ID` | unset: back-channel logout refused | The hub's client id at Propolis: the audience of the logout tokens that close a session's sockets |
 | `HUB_PAGE_ORIGINS` | none | The origins of the instance's product pages, comma-separated: the only pages that may open a socket (ADR 0016) |
 | `HUB_SUBSCRIPTIONS` | unset: no subscription | The subscriptions file the installer writes (TOML): which service receives which event kinds, at an endpoint on one of `HUB_PAGE_ORIGINS`. Applied whole at start |
+| `HUB_MANIFEST` | unset: `/.well-known/ruchoir-manifest` answers `404` | The instance's `manifest.json` the installer writes and mounts read-only (ADR 0004). Served as written at `/.well-known/ruchoir-manifest`, public (`Access-Control-Allow-Origin: *`, cached five minutes), read on each request so a product added later appears without a restart |
 | `HUB_CLIENT_KEY`, `HUB_CLIENT_KEY_ID` | unset: no members' replica | The hub's Ed25519 client key (PEM) the installer generated and its registered id, to read Propolis's change feed in its own name. Without them presence reaches nobody |
 | `HUB_VAPID_KEY` | unset: no web push | The instance's VAPID key, a P-256 private key in PEM (PKCS#8) the installer generated and keeps; replacing it drops every browser's subscription |
 | `HUB_PUSH_HOSTS` | the browsers' own services | The push services the hub may call, by host or parent domain, comma-separated |

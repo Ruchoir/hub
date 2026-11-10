@@ -197,6 +197,53 @@
         },
         "type": "object"
       },
+      "Manifest": {
+        "description": "The manifest of an instance, as the installer writes it. It describes the contract only: the\nfile is served as written.",
+        "properties": {
+          "domain": {
+            "description": "The instance's domain.",
+            "example": "example.org",
+            "type": "string"
+          },
+          "services": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ManifestService"
+            },
+            "description": "The installed services by name, each with its public address.",
+            "propertyNames": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "version": {
+            "description": "The format's version.",
+            "example": 1,
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version",
+          "domain",
+          "services"
+        ],
+        "type": "object"
+      },
+      "ManifestService": {
+        "description": "One installed service.",
+        "properties": {
+          "url": {
+            "description": "Where the service answers; it describes itself at `/.well-known/ruchoir-product` there.",
+            "example": "https://hub.example.org",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "type": "object"
+      },
       "MemberPresence": {
         "description": "One member's presence.",
         "properties": {
@@ -713,6 +760,33 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/.well-known/ruchoir-manifest": {
+      "get": {
+        "operationId": "serve",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Manifest"
+                }
+              }
+            },
+            "description": "The manifest the installer wrote"
+          },
+          "404": {
+            "description": "This hub serves no manifest (`HUB_MANIFEST` unset)"
+          },
+          "500": {
+            "description": "The manifest cannot be read or is not JSON"
+          }
+        },
+        "summary": "The instance's manifest: the installed services and their addresses.",
+        "tags": [
+          "product"
+        ]
+      }
+    },
     "/.well-known/ruchoir-product": {
       "get": {
         "operationId": "describe",

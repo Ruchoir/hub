@@ -19,6 +19,7 @@ use utoipa::OpenApi;
         crate::health::healthz,
         crate::health::health,
         crate::product::describe,
+        crate::manifest::serve,
         crate::inbox::publish,
         crate::inbox::read,
         crate::inbox::mark_read,
