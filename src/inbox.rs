@@ -69,7 +69,10 @@ pub struct Publication {
     pub object: String,
     /// Where the entry leads: an `https` address of the product.
     pub link: String,
-    /// What the entry shows, as it stood: names and an excerpt (`{"place": "#général"}`).
+    /// What the entry shows, as it stood: names and an excerpt (`{"place": "#général"}`). `title`
+    /// and `body` are the two lines an app draws for the entry, already written by the product in
+    /// the recipients' language (`{"title": "#général · Acme", "body": "Camille: on se cale ?"}`);
+    /// the hub keeps them as given.
     #[serde(default)]
     pub variables: serde_json::Map<String, Value>,
     /// The accounts it is for, as the product computed them.

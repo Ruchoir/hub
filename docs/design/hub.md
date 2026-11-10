@@ -72,7 +72,8 @@ when it publishes:
   `invitation`, `notice`), which decides urgency, preferences and mail;
 - `organisation`, `actor`, `object` (an opaque id), `link` (where the entry leads);
 - `variables`: the names and the excerpt the entry shows (`{"place": "#général", "excerpt": "..."}`),
-  as they stood when it was published;
+  as they stood when it was published, and `title` and `body`, the two lines the desktop and mobile
+  apps draw, already in the recipients' language (a product sends one entry per language);
 - `recipients`: the accounts it is for, as the product computed them.
 
 The words are a question (section 9.1).

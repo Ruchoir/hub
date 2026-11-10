@@ -195,8 +195,9 @@ compose.yaml         PostgreSQL and Valkey for a development machine
 ### Gotchas
 
 - A product names what an entry shows in its `variables`: `actor_name`, `place`, `subject`,
-  `excerpt`. Those four are what a lock screen and the digest read (`src/push/words.rs`); anything
-  else is for the product's own interface.
+  `excerpt`. Those four are what a lock screen and the digest read (`src/push/words.rs`). `title`
+  and `body` are the two lines the desktop and mobile apps draw, written by the product in the
+  recipients' language (one entry per language); anything else is for the product's own interface.
 - A browser's service worker never holds a token: it asks its product's backend, which asks
   `/api/v1/me/push/pending` with a token exchanged for the person. A phone asks with its own.
 - "Online" for a product (`POST /api/v1/presence/online`, the chat's `@ici`) is what others would
