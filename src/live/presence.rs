@@ -10,6 +10,9 @@
 //!   reads to others, kept by the hub (it moved from Propolis's accounts).
 //! - **Who sees it**: whoever shares an organisation, from the members' replica. A change (online,
 //!   offline, a new choice) is pushed to them as `hub.presence.changed`.
+//! - **A product's question** (`POST /api/v1/presence/online`): which of the accounts it names are
+//!   online as others see them, for the chat's `@ici`. The product computed who may be asked about;
+//!   the answer says nothing more than a presence dot would.
 
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
@@ -25,7 +28,7 @@ use utoipa::ToSchema;
 use uuid::Uuid;
 
 use super::ws::HEARTBEAT_SECS;
-use crate::auth::Person;
+use crate::auth::{Person, Publisher};
 use crate::{replica, AppState};
 
 const PREFIX: &str = "presence:";
@@ -107,6 +110,124 @@ pub async fn choice_of(db: &impl ConnectionTrait, account: Uuid) -> Result<Optio
         ))
         .await?;
     row.map(|r| r.try_get("", "choice")).transpose()
+}
+
+/// The most accounts one presence question may name.
+pub const MAX_ASKED: usize = 5_000;
+
+/// Which of `accounts` are online as others see them, in the order asked, each once.
+///
+/// Online means [`effective_for_others`] is not `offline`: a live heartbeat, and any choice but
+/// `invisible`. `away` and `dnd` stay online, as they are reachable and their dot says so; what
+/// they let through is their notification preferences' business, not presence's. This is the
+/// monolith's `@ici` (`presence::is_online`, the heartbeat alone) with one correction: it counted a
+/// person who chose `invisible`, which told the room they were there.
+///
+/// Two reads whatever the number asked: one `MGET` of the heartbeats, then one query of the
+/// choices of those with one.
+pub async fn online_among(
+    db: &impl ConnectionTrait,
+    valkey: &Pool,
+    accounts: &[Uuid],
+) -> Result<Vec<Uuid>, OnlineError> {
+    let mut seen = std::collections::HashSet::with_capacity(accounts.len());
+    let asked: Vec<Uuid> = accounts
+        .iter()
+        .copied()
+        .filter(|a| seen.insert(*a))
+        .collect();
+    if asked.is_empty() {
+        return Ok(Vec::new());
+    }
+    let keys: Vec<String> = asked.iter().map(|a| format!("{PREFIX}{a}")).collect();
+    let beats: Vec<Option<String>> = valkey.mget(keys).await.map_err(OnlineError::Valkey)?;
+    let live: Vec<Uuid> = asked
+        .into_iter()
+        .zip(beats)
+        .filter_map(|(account, beat)| beat.map(|_| account))
+        .collect();
+    if live.is_empty() {
+        return Ok(live);
+    }
+    let rows = db
+        .query_all_raw(Statement::from_sql_and_values(
+            DbBackend::Postgres,
+            "SELECT account_id, choice FROM presence_choices WHERE account_id = ANY($1)",
+            [live.clone().into()],
+        ))
+        .await
+        .map_err(OnlineError::Db)?;
+    let mut choices = std::collections::HashMap::with_capacity(rows.len());
+    for row in rows {
+        let account: Uuid = row.try_get("", "account_id").map_err(OnlineError::Db)?;
+        let choice: String = row.try_get("", "choice").map_err(OnlineError::Db)?;
+        choices.insert(account, choice);
+    }
+    Ok(live
+        .into_iter()
+        .filter(|a| effective_for_others(choices.get(a).map(String::as_str), true) != "offline")
+        .collect())
+}
+
+/// Why [`online_among`] could not answer.
+#[derive(Debug)]
+pub enum OnlineError {
+    Valkey(fred::error::Error),
+    Db(DbErr),
+}
+
+impl std::fmt::Display for OnlineError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            OnlineError::Valkey(error) => write!(f, "valkey: {error}"),
+            OnlineError::Db(error) => write!(f, "database: {error}"),
+        }
+    }
+}
+
+/// The accounts a product asks about.
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct Asked {
+    /// At most 5,000 accounts; repeats are answered once.
+    pub accounts: Vec<Uuid>,
+}
+
+/// Those of the asked accounts who are online.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct Online {
+    /// In the order asked. Online: a live connection and any choice but `invisible` (`away` and
+    /// `dnd` count).
+    pub online: Vec<Uuid>,
+}
+
+/// Which of these accounts are online as others see them, for a product (the chat's `@ici`).
+#[utoipa::path(
+    post,
+    path = "/api/v1/presence/online",
+    tag = "live",
+    request_body = Asked,
+    responses(
+        (status = 200, description = "Those online: connected now, and not `invisible` (`away` and `dnd` count)", body = Online),
+        (status = 400, description = "Refused (`reason`: `accounts`, more than 5,000)"),
+        (status = 401, description = "No valid token"),
+        (status = 403, description = "Not a product with `hub:publish`")
+    )
+)]
+pub async fn online(
+    State(state): State<AppState>,
+    _publisher: Publisher,
+    Json(body): Json<Asked>,
+) -> Result<Json<Online>, Problem> {
+    if body.accounts.len() > MAX_ASKED {
+        return Err(Problem::bad_request().with_reason("accounts"));
+    }
+    let online = online_among(&state.db, &state.valkey, &body.accounts)
+        .await
+        .map_err(|error| {
+            tracing::warn!(%error, "cannot read who is online");
+            Problem::internal()
+        })?;
+    Ok(Json(Online { online }))
 }
 
 /// What others see of `account` now.

@@ -101,6 +101,7 @@ pub fn router() -> Router<AppState> {
             "/api/v1/organisations/{id}/presence",
             get(presence::organisation),
         )
+        .route("/api/v1/presence/online", post(presence::online))
         .route(
             "/api/v1/me/presence",
             get(presence::mine).put(presence::choose),

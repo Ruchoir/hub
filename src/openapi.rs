@@ -32,6 +32,7 @@ use utoipa::OpenApi;
         crate::live::presence::organisation,
         crate::live::presence::mine,
         crate::live::presence::choose,
+        crate::live::presence::online,
         crate::prefs::read,
         crate::prefs::save,
         crate::prefs::set_level,

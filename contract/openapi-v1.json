@@ -1,6 +1,23 @@
 {
   "components": {
     "schemas": {
+      "Asked": {
+        "description": "The accounts a product asks about.",
+        "properties": {
+          "accounts": {
+            "description": "At most 5,000 accounts; repeats are answered once.",
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "accounts"
+        ],
+        "type": "object"
+      },
       "Categories": {
         "description": "Which categories reach someone through one channel.",
         "properties": {
@@ -291,6 +308,23 @@
             "type": "integer"
           }
         },
+        "type": "object"
+      },
+      "Online": {
+        "description": "Those of the asked accounts who are online.",
+        "properties": {
+          "online": {
+            "description": "In the order asked. Online: a live connection and any choice but `invisible` (`away` and\n`dnd` count).",
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "online"
+        ],
         "type": "object"
       },
       "Page": {
@@ -1460,6 +1494,46 @@
           }
         },
         "summary": "The presence of an organisation's members, for one of them.",
+        "tags": [
+          "live"
+        ]
+      }
+    },
+    "/api/v1/presence/online": {
+      "post": {
+        "operationId": "online",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Asked"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Online"
+                }
+              }
+            },
+            "description": "Those online: connected now, and not `invisible` (`away` and `dnd` count)"
+          },
+          "400": {
+            "description": "Refused (`reason`: `accounts`, more than 5,000)"
+          },
+          "401": {
+            "description": "No valid token"
+          },
+          "403": {
+            "description": "Not a product with `hub:publish`"
+          }
+        },
+        "summary": "Which of these accounts are online as others see them, for a product (the chat's `@ici`).",
         "tags": [
           "live"
         ]
