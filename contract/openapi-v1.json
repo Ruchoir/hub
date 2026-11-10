@@ -524,7 +524,7 @@
           },
           "variables": {
             "additionalProperties": {},
-            "description": "What the entry shows, as it stood: names and an excerpt (`{\"place\": \"#général\"}`).",
+            "description": "What the entry shows, as it stood: names and an excerpt (`{\"place\": \"#général\"}`). `title`\nand `body` are the two lines an app draws for the entry, already written by the product in\nthe recipients' language (`{\"title\": \"#général · Acme\", \"body\": \"Camille: on se cale ?\"}`);\nthe hub keeps them as given.",
             "propertyNames": {
               "type": "string"
             },
