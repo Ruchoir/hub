@@ -16,6 +16,7 @@ pub mod events;
 pub mod health;
 pub mod inbox;
 pub mod live;
+pub mod manifest;
 pub mod openapi;
 pub mod prefs;
 pub mod product;
@@ -83,6 +84,7 @@ pub fn app(state: AppState) -> Router {
         .route("/api/v1/health", get(health::health))
         .route("/api/v1/openapi.json", get(openapi::contract))
         .route("/.well-known/ruchoir-product", get(product::describe))
+        .route("/.well-known/ruchoir-manifest", get(manifest::serve))
         .merge(inbox::router())
         .merge(live::routes::router())
         .merge(events::router())

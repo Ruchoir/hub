@@ -39,6 +39,9 @@ pub const CLIENT_ID: &str = "HUB_CLIENT_ID";
 pub const PAGE_ORIGINS: &str = "HUB_PAGE_ORIGINS";
 /// The subscriptions file the installer writes: which service receives which event kinds.
 pub const SUBSCRIPTIONS: &str = "HUB_SUBSCRIPTIONS";
+/// The instance's manifest the installer writes (`manifest.json`), served at
+/// `/.well-known/ruchoir-manifest`. Unset: that route answers `404`.
+pub const MANIFEST: &str = "HUB_MANIFEST";
 /// The hub's Ed25519 client key (PEM, PKCS#8) the installer generated, to read Propolis's change
 /// feed in its own name.
 pub const CLIENT_KEY: &str = "HUB_CLIENT_KEY";
@@ -95,6 +98,8 @@ pub struct Config {
     pub page_origins: Vec<String>,
     /// The subscriptions file, when there is one.
     pub subscriptions: Option<std::path::PathBuf>,
+    /// The manifest file, when the hub serves one.
+    pub manifest: Option<std::path::PathBuf>,
     /// The hub's client key file and its key id, when it reads Propolis's change feed.
     pub client_key: Option<(std::path::PathBuf, String)>,
     /// The VAPID key file, when the hub sends web push.
@@ -171,6 +176,9 @@ impl Config {
                 .filter(|o| !o.is_empty())
                 .collect(),
             subscriptions: lookup(SUBSCRIPTIONS)
+                .filter(|v| !v.trim().is_empty())
+                .map(std::path::PathBuf::from),
+            manifest: lookup(MANIFEST)
                 .filter(|v| !v.trim().is_empty())
                 .map(std::path::PathBuf::from),
             client_key: match (lookup(CLIENT_KEY), lookup(CLIENT_KEY_ID)) {
@@ -296,6 +304,7 @@ mod tests {
         );
         assert!(config.auto_migrate);
         assert!(config.vapid_key.is_none());
+        assert!(config.manifest.is_none());
         assert_eq!(config.push_hosts.len(), 4);
         assert_eq!(
             config.push_relay_url.as_deref(),
