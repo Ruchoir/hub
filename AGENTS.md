@@ -45,18 +45,26 @@ what is specific to this repository, and never contradicts this block.
   then a short English name in kebab case.
 - Commits and pull request titles follow Conventional Commits in English
   (`build|chore|ci|docs|feat|fix|perf|refactor|revert|style|test`, optional scope, `!` for a break).
-  Pull requests are squash-merged, so the title becomes the commit.
+  Pull requests are squash-merged, so the title becomes the commit. The one exception is code moved
+  with its history from another repository: that pull request is merged with a merge commit, and the
+  `conventions` check skips the merge commit's own subject (ADR 0009).
 - No ticket identifiers, lot names or code names in branches, commits or pull requests: say what the
   change does.
 - Never commit a secret. `.env` stays out of git; `.env.example` documents every variable.
+- A contributor from outside the team signs the contributor licence agreement (`CLA.md` of
+  `Ruchoir/.github`) on their first pull request; a check asks for it.
 
 ### Releases
 
-- Each service is versioned with SemVer, independently of the major version of its API.
-- A tag `vX.Y.Z` builds and publishes a signed image to `registry.ruchoir.com`, with release notes drawn
-  from the commits. **A tag deploys nothing.** Every instance, the testers' included, is updated
-  through the installer, like a customer's.
-- Packages of `Ruchoir/core` are published with their own versions, and consumers pin them.
+- Each service (`propolis`, `hub`, `drive`, `calendar`, `chat`) is versioned with SemVer,
+  independently of the major version of its API.
+- A service's tag `vX.Y.Z` builds and publishes a signed image to `registry.ruchoir.com`, with
+  release notes drawn from the commits. **A tag deploys nothing.** Every instance, the testers'
+  included, is updated through the installer, like a customer's.
+- These two rules are for the services. Any other repository (an app, the installer, a site) says in
+  its `AGENTS.md` what its tag publishes.
+- `Ruchoir/core` is released as one version: every crate and package carries it, and a product pins
+  one version of `core` for all of them (ADR 0013).
 
 ### Decisions
 
@@ -67,12 +75,12 @@ what is specific to this repository, and never contradicts this block.
 
 ### Licences
 
-- Services and apps (`chat`, `drive`, `calendar`, `propolis`, the notification and real-time service,
-  `desktop`, `mobile`): `AGPL-3.0-only`.
-- What another developer embeds in their own code (the Propolis SDK, the API clients, the design
-  system): `MIT OR Apache-2.0`.
-- Each package declares its licence in its manifest. A repository holding both kinds ships both
-  licence texts. Fonts keep their own licence (IBM Plex, OFL).
+- Services, apps and the installer (`propolis`, `hub`, `drive`, `calendar`, `chat`, `desktop`,
+  `mobile`, `installer`): `AGPL-3.0-only`.
+- `Ruchoir/core`, which holds what another developer embeds in their own code (the Propolis SDK, the
+  API clients, the design system): `MPL-2.0` (ADR 0014). `Ruchoir/.github`: `MIT OR Apache-2.0`.
+- Each package declares its licence in its manifest. A repository holding code under two licences
+  ships both texts. Fonts keep their own licence (IBM Plex, OpenDyslexic: OFL).
 - The enterprise module is proprietary. It is never published, copied or vendored into a public
   repository, and a public repository never names, fetches or requires it.
 
@@ -89,6 +97,8 @@ what is specific to this repository, and never contradicts this block.
 - Strong encryption in transit and at rest. TLS everywhere, `wss://` only.
 - The server never trusts the client: every request is authenticated and authorized server-side.
 - Never log a password, token, secret or private content.
+- A vulnerability is reported privately, through GitHub's private vulnerability reporting, never in
+  an issue (`SECURITY.md` of `Ruchoir/.github`).
 - Minimise data. Every service exports and deletes a person's data when Propolis announces a deletion,
   and a test proves it.
 

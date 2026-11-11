@@ -1,0 +1,22 @@
+# Asks outside contributors to sign the contributor licence agreement (Ruchoir/.github, CLA.md and
+# ADR 0019). `pull_request_target` takes this workflow from the base branch, and the reusable one
+# never checks out the pull request's code.
+name: CLA
+
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize, closed]
+  issue_comment:
+    types: [created]
+
+permissions:
+  actions: write
+  contents: read
+  pull-requests: write
+  statuses: write
+
+jobs:
+  cla:
+    uses: Ruchoir/.github/.github/workflows/cla.yml@v2.0.0
+    secrets:
+      signatures-token: ${{ secrets.CLA_SIGNATURES_TOKEN }}
