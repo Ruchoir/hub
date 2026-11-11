@@ -5,7 +5,7 @@
 //! finish. `hub migrate` applies the pending migrations and exits: the deliberate path of a
 //! production upgrade. [`app`] is the whole HTTP surface, which the tests drive without a socket.
 //!
-//! The skeleton is Propolis's (Ruchoir/propolis, step 2.1 of the restructuring).
+//! The skeleton is Propolis's (Ruchoir/propolis).
 
 pub mod auth;
 pub mod cache;

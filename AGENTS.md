@@ -120,10 +120,11 @@ The hub is the notifications and real-time service of Ruchoir, installed with ev
 inbox, web push, phone push through the push relay, email digests, and live delivery to connected
 pages and apps (WebSocket, with SSE as a fallback).
 
-**Status:** the service skeleton, on its stores: it starts, reaches PostgreSQL and Valkey, applies
-its migrations, answers its probes, describes itself and serves its contract. The skeleton is
-Propolis's (step 2.1 of the restructuring). The push relay is here; the inbox, push and live
-delivery come next.
+**Status:** the hub runs on its stores, PostgreSQL and Valkey, and serves its contract: the inbox,
+notification preferences, live delivery to pages (with a single-use ticket) and apps (with their
+token), presence, server events between services with retries, web push, phone push through the
+relay, the mail digest, and the instance's manifest. Its skeleton is Propolis's. The push relay
+lives in `relay/`, but is still released from the former monolith until its release moves here.
 
 ### Layout
 
