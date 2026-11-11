@@ -5,7 +5,7 @@
 //!
 //! - [`web`], [`vapid`] and [`ece`]: Web Push to the browsers that subscribed (ADR 0001), carrying a
 //!   constant encrypted marker and never any content;
-//! - [`phone`]: the phone apps, woken through the publisher's relay (ADR 0006), also without
+//! - [`phone`]: the phone apps, woken through the publisher's relay (ADR 0002), also without
 //!   content;
 //! - [`words`]: what a tray or a lock screen shows when the device asks, in the person's language.
 //!

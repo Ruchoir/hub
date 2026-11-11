@@ -1,4 +1,4 @@
-//! Phone notifications (ADR 0006): the phones that allowed them, and waking them through the
+//! Phone notifications (ADR 0002): the phones that allowed them, and waking them through the
 //! publisher's relay.
 //!
 //! The instance never holds Apple's or Google's keys. It posts a device's token to the relay
@@ -234,7 +234,7 @@ pub async fn wake(state: &AppState, device: Device) {
 const SYNC_WINDOW_SECS: u64 = 3;
 
 /// Some of the person's entries were read: in a few seconds, tell each of their phones, silently, to
-/// count again and clear the read ones from the screen (ADR 0006). Reads within the window ride on
+/// count again and clear the read ones from the screen (ADR 0002). Reads within the window ride on
 /// the push already planned. Nothing is sent when the instance has no relay.
 pub async fn sync_soon(state: &AppState, account: Uuid) {
     if state.config.push_relay_url.is_none() {

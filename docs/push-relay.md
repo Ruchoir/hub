@@ -5,16 +5,16 @@ may hold the keys that let a server push to them. So instances do not push to ph
 ask the **push relay** (`relay/` of this repository), run by the publisher, to wake a device, and the relay
 sends a constant push. The phone then asks its instances what to show: the push does not say which
 one sent it, so a phone signed in to several asks each of them and shows the newest
-([ADR 0007](adr/0007-several-instances-in-the-apps.md)). Why, and what crosses:
-[ADR 0006](adr/0006-phone-push-relay.md).
+([ADR 0002 of `Ruchoir/mobile`](https://github.com/Ruchoir/mobile/blob/main/docs/adr/0002-several-instances-in-the-apps.md)).
+Why, and what crosses: this repository's [ADR 0002](adr/0002-phone-push-relay.md).
 
 ```
 instance ── POST /v1/send {platform, token} ──▶ relay ── constant push ──▶ Apple / Google ──▶ phone
-phone ── GET /api/v1/push/pending (its session there) ──▶ each of its instances ── what to show
+phone ── GET /api/v1/me/push/pending (its token there) ──▶ each of its instances ── what to show
 
 read elsewhere:
 instance ── POST /v1/sync {platform, token} ──▶ relay ── silent push ──▶ Apple / Google ──▶ phone
-phone ── GET /api/v1/notifications?unread=true ──▶ each instance ── icon count, read ones cleared
+phone ── GET /api/v1/me/inbox?unread=true ──▶ each instance ── icon count, read ones cleared
 ```
 
 ## What it answers
@@ -23,7 +23,7 @@ phone ── GET /api/v1/notifications?unread=true ──▶ each instance ─�
 |---|---|
 | `GET /health` | `{"status":"ok","apns":true,"fcm":false}`: which vendors have their key |
 | `POST /v1/send` `{"platform":"ios"\|"android","token":"…"}` | `202 delivered`; `410 gone` (the instance forgets the device); `400` (not a token, unknown platform); `429` (rate limited: 1,200 a minute per address, 20 a minute per device); `503 not_configured` (that vendor's key is missing); `502 failed` (the vendor refused or could not be reached) |
-| `POST /v1/sync`, same body | the silent push saying something was read elsewhere (ADR 0006, amendment of 2026-10-21): to Apple a background push (`content-available`, priority 5), to Google `{"ruchoir":"sync"}` at normal priority. Same answers; its own allowance of 10 a minute per device, so syncs never use up wakes |
+| `POST /v1/sync`, same body | the silent push saying something was read elsewhere ([ADR 0002](adr/0002-phone-push-relay.md), amendment of 2026-10-21): to Apple a background push (`content-available`, priority 5), to Google `{"ruchoir":"sync"}` at normal priority. Same answers; its own allowance of 10 a minute per device, so syncs never use up wakes |
 
 It keeps nothing but rate-limit counters, and never logs a token. Behind nginx, which adds TLS and
 the caller's address (`X-Real-IP`); the relay itself listens on the loopback only.
@@ -53,8 +53,8 @@ production and sandbox.
 
 **Google.** In the Firebase console, a project ("Ruchoir"), an Android app `com.ruchoir.app`:
 
-- its `google-services.json` goes in the repository's Actions secrets as `GOOGLE_SERVICES_JSON` (the
-  whole file), for the Android build (`docs/mobile-builds.md`);
+- its `google-services.json` goes in the Actions secrets of `Ruchoir/mobile` as `GOOGLE_SERVICES_JSON`
+  (the whole file), for the Android build (that repository's `release.yml` workflow);
 - Project settings, **Service accounts**, "Generate new private key": the JSON file is the relay's
   `FCM_SERVICE_ACCOUNT_FILE`. Cloud Messaging API (V1) must be enabled for the project.
 
@@ -70,7 +70,7 @@ docker build -f relay/Dockerfile -t ruchoir-push-relay:0.1.0 .
 
 ### Production (the website's server)
 
-`https://ruchoir.com/push/`, the default `RUCHOIR_PUSH_RELAY_URL` of every instance, on `ruchoir-site`,
+`https://ruchoir.com/push/`, the default `HUB_PUSH_RELAY_URL` of every instance's hub, on `ruchoir-site`,
 deployed by a tag (below). Once, by hand:
 
 - the keys in `/etc/ruchoir-push-relay/` (`apns.p8`, `fcm.json` when there is one, `relay.env` with
@@ -108,13 +108,13 @@ uses it, whatever version each runs.
 
 ### Development
 
-The dev stack runs its own relay (`push-relay` in the local `docker-compose.override.yml`, with the
-keys in `~/.config/ruchoir-push-relay/`), and the dev API points at it
-(`RUCHOIR_PUSH_RELAY_URL=http://push-relay:8080`). An instance on a private network may use plain
-`http` to its relay; anything public uses `https`.
+A relay of your own, with its own keys, is built from `relay/Dockerfile` (above), and a hub points
+at it with `HUB_PUSH_RELAY_URL` (`http://push-relay:8080`, for example). A hub on a private network
+may use plain `http` to its relay; anything public uses `https`. The hub's tests empty the variable,
+so they never call a relay.
 
 ## On the instance
 
-`RUCHOIR_PUSH_RELAY_URL` (default `https://ruchoir.com/push`; empty: phones are left out). The
-administrator's push switch covers phones too. The instance only ever sends the platform and the
-token; which notifications wake a phone follows the person's preferences, as for a browser.
+The hub is the instance's side: `HUB_PUSH_RELAY_URL` (default `https://ruchoir.com/push`; empty:
+phones are left out). It only ever sends the platform and the token; which notifications wake a phone
+follows the person's preferences, as for a browser.

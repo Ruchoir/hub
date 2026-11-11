@@ -1,4 +1,4 @@
-//! The publisher-run push relay (ADR 0006).
+//! The publisher-run push relay (ADR 0002).
 //!
 //! A Ruchoir instance cannot hold the keys that let a server push to the published phone apps, so it
 //! posts `{platform, token}` here, and the relay wakes that device through Apple (APNs) or Google

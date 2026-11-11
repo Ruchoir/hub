@@ -1,4 +1,4 @@
-//! The push relay's process: reads its keys, serves `/health` and `/v1/send` (ADR 0006).
+//! The push relay's process: reads its keys, serves `/health` and `/v1/send` (ADR 0002).
 //!
 //! Configuration, from the environment:
 //!

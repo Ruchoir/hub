@@ -184,7 +184,7 @@ compose.yaml         PostgreSQL and Valkey for a development machine
 | `HUB_CLIENT_KEY`, `HUB_CLIENT_KEY_ID` | unset: no members' replica | The hub's Ed25519 client key (PEM) the installer generated and its registered id, to read Propolis's change feed in its own name. Without them presence reaches nobody |
 | `HUB_VAPID_KEY` | unset: no web push | The instance's VAPID key, a P-256 private key in PEM (PKCS#8) the installer generated and keeps; replacing it drops every browser's subscription |
 | `HUB_PUSH_HOSTS` | the browsers' own services | The push services the hub may call, by host or parent domain, comma-separated |
-| `HUB_PUSH_RELAY_URL` | `https://ruchoir.com/push` | The publisher's relay that wakes the phones (ADR 0006); empty: no phone |
+| `HUB_PUSH_RELAY_URL` | `https://ruchoir.com/push` | The publisher's relay that wakes the phones (this repository's [ADR 0002](docs/adr/0002-phone-push-relay.md)); empty: no phone |
 | `HUB_DIGEST_DELAY_SECS` | `900` | How long an entry waits unread before the mail digest; `0`: no digest. Needs `HUB_CLIENT_KEY` |
 | `RUST_LOG` | `info` | Log filter |
 
