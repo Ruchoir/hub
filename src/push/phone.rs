@@ -197,6 +197,7 @@ pub struct PhoneTest {
 #[utoipa::path(
     post,
     path = "/api/v1/me/push/devices/test",
+    operation_id = "test_device_push",
     tag = "push",
     responses(
         (status = 200, description = "Woken", body = PhoneTest),

@@ -277,6 +277,7 @@ pub async fn wanting(
 #[utoipa::path(
     get,
     path = "/api/v1/me/notification-preferences",
+    operation_id = "read_notification_preferences",
     tag = "preferences",
     responses((status = 200, description = "The settings, with the defaults for what was never saved", body = NotificationPrefs))
 )]

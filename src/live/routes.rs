@@ -20,6 +20,7 @@ pub const MAX_AUDIENCE: usize = 10_000;
 #[utoipa::path(
     post,
     path = "/api/v1/live/publish",
+    operation_id = "publish_live",
     tag = "live",
     request_body(content = Object, description = "A `Publication` of ruchoir-events: `audience` and `frame`"),
     responses(

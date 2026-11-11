@@ -655,6 +655,7 @@ pub(super) async fn arm_test(state: &AppState, account: Uuid) -> Result<(), Prob
 #[utoipa::path(
     post,
     path = "/api/v1/me/push/test",
+    operation_id = "test_web_push",
     tag = "push",
     responses(
         (status = 200, description = "Sent", body = PushTest),
