@@ -32,7 +32,7 @@ struct Claims<'a> {
 }
 
 /// What every push carries: an alert the phone's Notification Service Extension replaces with what
-/// the instance says (`mutable-content`), and nothing else. Never any content (ADR 0006).
+/// the instance says (`mutable-content`), and nothing else. Never any content (ADR 0002).
 pub fn payload() -> Value {
     json!({
         "aps": {

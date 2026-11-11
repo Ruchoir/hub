@@ -133,7 +133,7 @@ The words are a question (section 9.1).
 | A page or an app on a socket | The ticket, or the app's token for the hub |
 | A person reading their inbox and settings | Their token for the hub (through their product's backend, or an app) |
 
-**All of it needs Propolis's OpenID Connect provider (step 2.3).** Without it, no call reaching the
+**All of it needs Propolis's OpenID Connect provider.** Without it, no call reaching the
 hub can be authenticated.
 
 ## 9. Decided
@@ -148,7 +148,7 @@ Taken by Théo on 2026-11-07:
    not disturb.
 3. **Presence reaches whoever shares an organisation**, from the hub's replica of the members, fed by
    Propolis's events.
-4. **Propolis's OpenID Connect provider (2.3) comes first**, then the hub on its tokens.
+4. **Propolis's OpenID Connect provider comes first**, then the hub on its tokens.
 
 [.github ADR 0003]: https://github.com/Ruchoir/.github/blob/main/docs/adr/0003-hub-notifications-and-real-time.md
 [.github ADR 0015]: https://github.com/Ruchoir/.github/blob/main/docs/adr/0015-server-events-travel-through-the-hub.md

@@ -53,7 +53,7 @@ pub const VAPID_KEY: &str = "HUB_VAPID_KEY";
 /// The push services the hub may call, by host or parent domain, comma-separated: an endpoint is a
 /// URL the browser chose, so anything else is refused (the browsers' own services by default).
 pub const PUSH_HOSTS: &str = "HUB_PUSH_HOSTS";
-/// The publisher's relay that wakes the phone apps (ADR 0006). Empty: no phone is woken.
+/// The publisher's relay that wakes the phone apps (ADR 0002). Empty: no phone is woken.
 pub const PUSH_RELAY_URL: &str = "HUB_PUSH_RELAY_URL";
 /// How long an entry waits unread before it goes into a mail digest, in seconds (15 minutes by
 /// default); `0` turns the digest off.
@@ -67,7 +67,7 @@ const DEFAULT_VALKEY_URL: &str = "redis://localhost:6379";
 /// Microsoft's. The instance does not choose them: each browser brings its vendor's (ADR 0001).
 pub const DEFAULT_PUSH_HOSTS: &str =
     "fcm.googleapis.com,push.services.mozilla.com,push.apple.com,notify.windows.com";
-/// The publisher's relay (ADR 0006).
+/// The publisher's relay (ADR 0002).
 pub const DEFAULT_PUSH_RELAY_URL: &str = "https://ruchoir.com/push";
 
 /// The settings of a running the hub. Its `Debug` output leaves out the stores' addresses, which

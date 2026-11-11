@@ -6,7 +6,7 @@ rust-version = "1.96"
 license = "AGPL-3.0-only"
 repository = "https://github.com/Ruchoir/hub"
 publish = false
-description = "The publisher-run relay that wakes Ruchoir's phone apps through APNs and FCM, without content (ADR 0006)."
+description = "The publisher-run relay that wakes Ruchoir's phone apps through APNs and FCM, without content (ADR 0002 of Ruchoir/hub)."
 
 [dependencies]
 # The same versions as the hub's, which were the monolith's workspace's.
