@@ -893,7 +893,7 @@
     },
     "/api/v1/inbox": {
       "post": {
-        "operationId": "publish",
+        "operationId": "publish_to_inbox",
         "requestBody": {
           "content": {
             "application/json": {
@@ -933,7 +933,7 @@
     },
     "/api/v1/live/publish": {
       "post": {
-        "operationId": "publish",
+        "operationId": "publish_live",
         "requestBody": {
           "content": {
             "application/json": {
@@ -967,7 +967,7 @@
     },
     "/api/v1/live/sse": {
       "get": {
-        "operationId": "open",
+        "operationId": "open_sse",
         "parameters": [
           {
             "description": "A page's single-use ticket.",
@@ -1028,7 +1028,7 @@
     },
     "/api/v1/live/ws": {
       "get": {
-        "operationId": "open",
+        "operationId": "open_ws",
         "parameters": [
           {
             "description": "A page's single-use ticket.",
@@ -1062,7 +1062,7 @@
     },
     "/api/v1/me/inbox": {
       "get": {
-        "operationId": "read",
+        "operationId": "read_inbox",
         "parameters": [
           {
             "description": "Only what is unread.",
@@ -1198,7 +1198,7 @@
     },
     "/api/v1/me/notification-preferences": {
       "get": {
-        "operationId": "read",
+        "operationId": "read_notification_preferences",
         "responses": {
           "200": {
             "content": {
@@ -1386,7 +1386,7 @@
     "/api/v1/me/push/devices/test": {
       "post": {
         "description": "The phones' counterpart of [`super::web::test`], through the same chain as a real entry: the\nrelay, the phone waking up, and the phone asking `GET /api/v1/me/push/pending`, which hands it the\ntest once. Quiet hours and settings do not apply: it was asked for.",
-        "operationId": "test",
+        "operationId": "test_device_push",
         "responses": {
           "200": {
             "content": {
@@ -1512,7 +1512,7 @@
     "/api/v1/me/push/test": {
       "post": {
         "description": "The whole chain the entries take, on purpose: the hub, the vendor's push service, the service\nworker waking up and asking for what to draw. Quiet hours and settings do not apply: it was asked\nfor.",
-        "operationId": "test",
+        "operationId": "test_web_push",
         "responses": {
           "200": {
             "content": {

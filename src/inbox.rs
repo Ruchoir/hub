@@ -131,6 +131,7 @@ impl Publication {
 #[utoipa::path(
     post,
     path = "/api/v1/inbox",
+    operation_id = "publish_to_inbox",
     tag = "inbox",
     request_body = Publication,
     responses(
@@ -270,6 +271,7 @@ pub struct FeedQuery {
 #[utoipa::path(
     get,
     path = "/api/v1/me/inbox",
+    operation_id = "read_inbox",
     tag = "inbox",
     params(FeedQuery),
     responses(

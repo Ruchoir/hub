@@ -29,6 +29,7 @@ pub const HEARTBEAT_SECS: u64 = 45;
 #[utoipa::path(
     get,
     path = "/api/v1/live/ws",
+    operation_id = "open_ws",
     tag = "live",
     params(OpenQuery),
     responses(

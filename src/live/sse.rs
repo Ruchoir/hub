@@ -40,6 +40,7 @@ impl Drop for Guard {
 #[utoipa::path(
     get,
     path = "/api/v1/live/sse",
+    operation_id = "open_sse",
     tag = "live",
     params(OpenQuery),
     responses(
