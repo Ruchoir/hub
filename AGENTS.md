@@ -124,7 +124,7 @@ pages and apps (WebSocket, with SSE as a fallback).
 notification preferences, live delivery to pages (with a single-use ticket) and apps (with their
 token), presence, server events between services with retries, web push, phone push through the
 relay, the mail digest, and the instance's manifest. Its skeleton is Propolis's. The push relay
-lives in `relay/`, but is still released from the former monolith until its release moves here.
+lives in `relay/` and is released from here by its own tag (below).
 
 ### Layout
 
@@ -168,12 +168,23 @@ migration/           the hub-migration crate
 relay/               the push relay (`ruchoir-push-relay`), from the monolith: run by the publisher,
                      apart from every instance, it wakes the phone apps through APNs and FCM without
                      content. Its own Dockerfile; see docs/push-relay.md
+infra/push-relay/    what the website's server needs to run the relay: compose.yml, the deploy
+                     script (health check, rollback) and the deploy key's forced command
 contract/            openapi-v1.json, the recorded contract
 tests/               common/ (the stores of a test), service.rs, stores.rs, cache_reconnect.rs,
                      contract.rs
 Dockerfile           the image: release binary, slim Debian, user 10001, health check on /healthz
 compose.yaml         PostgreSQL and Valkey for a development machine
 ```
+
+### Releases of this repository
+
+- The hub's own tags `vX.Y.Z` follow the common rules (none is published yet).
+- The push relay ships apart: a tag `push-relay-vX.Y.Z` (`.github/workflows/push-relay-release.yml`)
+  builds `registry.ruchoir.com/ruchoir/push-relay:vX.Y.Z` and deploys it on the website's server,
+  where `https://ruchoir.com/push/` serves every instance. This tag deploys, unlike a service's: the
+  relay is run by the publisher, not by an instance. Its secrets and the server's setup:
+  `docs/push-relay.md`, "Releasing".
 
 ### Settings
 

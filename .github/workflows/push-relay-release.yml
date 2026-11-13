@@ -1,12 +1,14 @@
-# Push relay release (ADR 0006): a tag `push-relay-v1.2.3` builds the relay's image, pushes it to
-# Ruchoir's own registry, and deploys it on the website's server, where https://ruchoir.com/push/
-# serves it. The relay ships on its own, apart from the instance's `v1.2.3` tags (release.yml): every
-# instance uses it, whatever version each runs.
+# Push relay release (ADR 0002, docs/push-relay.md): a tag `push-relay-v1.2.3` builds the relay's
+# image, pushes it to Ruchoir's own registry, and deploys it on the website's server, where
+# https://ruchoir.com/push/ serves it. The relay ships on its own, apart from the instance's `v1.2.3` tags (the hub's own
+# releases): every instance uses it, whatever version each runs.
 #
-# Needs, besides the registry account release.yml uses:
-#   secrets RELAY_DEPLOY_SSH_KEY       the private key bound to push-relay-deploy-entry
-#   secrets RELAY_DEPLOY_KNOWN_HOSTS   the website server's host keys, as `ssh-keyscan` prints them
-#   variables RELAY_DEPLOY_HOST        the website's server
+# Needs (docs/push-relay.md, "Releasing"):
+#   secrets REGISTRY_USER, REGISTRY_PASSWORD   an account of registry.ruchoir.com allowed to push
+#   secrets RELAY_DEPLOY_SSH_KEY               the private key bound to push-relay-deploy-entry
+#   secrets DEPLOY_KNOWN_HOSTS                 the website server's host keys, as `ssh-keyscan` prints them
+#   variables DEPLOY_HOST                      the website's server
+# The deploy job runs in the `production` environment.
 name: Push relay release
 
 on:
@@ -51,7 +53,7 @@ jobs:
         run: |
           docker buildx create --use --driver docker-container >/dev/null
           docker buildx build \
-            --file apps/push-relay/Dockerfile \
+            --file relay/Dockerfile \
             --cache-from "type=registry,ref=$IMAGE:buildcache" \
             --cache-to "type=registry,ref=$IMAGE:buildcache,mode=max" \
             --tag "$IMAGE:$VERSION" \
@@ -73,12 +75,12 @@ jobs:
       - name: Deploy through the deploy account
         env:
           RELAY_DEPLOY_SSH_KEY: ${{ secrets.RELAY_DEPLOY_SSH_KEY }}
-          RELAY_DEPLOY_KNOWN_HOSTS: ${{ secrets.RELAY_DEPLOY_KNOWN_HOSTS }}
-          RELAY_DEPLOY_HOST: ${{ vars.RELAY_DEPLOY_HOST }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
           VERSION: ${{ needs.image.outputs.version }}
         run: |
           install -d -m 700 ~/.ssh
           printf '%s\n' "$RELAY_DEPLOY_SSH_KEY" > ~/.ssh/deploy
           chmod 600 ~/.ssh/deploy
-          printf '%s\n' "$RELAY_DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
-          ssh -i ~/.ssh/deploy -o IdentitiesOnly=yes -o BatchMode=yes "deploy@$RELAY_DEPLOY_HOST" "$VERSION" < bundle.tar.gz
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          ssh -i ~/.ssh/deploy -o IdentitiesOnly=yes -o BatchMode=yes "deploy@$DEPLOY_HOST" "$VERSION" < bundle.tar.gz

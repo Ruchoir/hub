@@ -96,15 +96,24 @@ deployed by a tag (below). Once, by hand:
 
 ### Releasing
 
-Until its release moves here, with its secrets, the relay is released from `Ruchoir/ruchoir`: a
-tag `push-relay-vX.Y.Z` there (`.github/workflows/push-relay-release.yml`) builds the image
-(`registry.ruchoir.com/ruchoir/push-relay:vX.Y.Z`), pushes it, and runs `push-relay-deploy` through
-the `deploy` account with `infra/push-relay` as the bundle: it pulls the image, starts it
-(`/opt/push-relay`, `infra/push-relay/compose.yml`), waits for its health check and puts the previous
-image back if it never passes. Log: `/var/log/push-relay-deploy.log`. Secrets
-`RELAY_DEPLOY_SSH_KEY`, `RELAY_DEPLOY_KNOWN_HOSTS`, variable `RELAY_DEPLOY_HOST`; the registry
-account is release.yml's. The relay ships apart from the instance's `vX.Y.Z` tags: every instance
-uses it, whatever version each runs.
+A tag `push-relay-vX.Y.Z` of this repository (`.github/workflows/push-relay-release.yml`) builds the
+image from `relay/Dockerfile` (`registry.ruchoir.com/ruchoir/push-relay:vX.Y.Z`), pushes it, and runs
+`push-relay-deploy` through the `deploy` account with `infra/push-relay` as the bundle: it pulls the
+image, starts it (`/opt/push-relay`, `infra/push-relay/compose.yml`), waits for its health check and
+puts the previous image back if it never passes. Log: `/var/log/push-relay-deploy.log`. The relay
+ships apart from the hub's `vX.Y.Z` tags: every instance uses it, whatever version each runs. The
+release and its deploy files came from the former monolith with their history; the bundle keeps the
+path `infra/push-relay`, which the deploy script already on the server checks.
+
+What the workflow reads, in this repository's settings (none is in the repository):
+
+| Kind | Name | What |
+|---|---|---|
+| secret | `REGISTRY_USER`, `REGISTRY_PASSWORD` | an account of `registry.ruchoir.com` allowed to push `ruchoir/push-relay` |
+| secret | `RELAY_DEPLOY_SSH_KEY` | the private half of the `ci-push-relay` key, bound to `push-relay-deploy-entry` on the `deploy` account |
+| secret | `DEPLOY_KNOWN_HOSTS` | the website server's host keys, as `ssh-keyscan` prints them (the same value as in `Ruchoir/desktop` and `Ruchoir/mobile`) |
+| variable | `DEPLOY_HOST` | the website's server (the same as in `Ruchoir/desktop` and `Ruchoir/mobile`) |
+| environment | `production` | the deploy job runs in it; put the deploy secrets there, with a required review |
 
 ### Development
 

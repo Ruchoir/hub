@@ -1,4 +1,4 @@
-# The push relay (ADR 0006) on the website's server: the image a `push-relay-v*` tag built, on
+# The push relay (ADR 0002) on the website's server: the image a `push-relay-v*` tag built, on
 # 127.0.0.1 only. The server's nginx terminates TLS for ruchoir.com and forwards /push/ here
 # (docs/push-relay.md). RELAY_IMAGE is set in .env beside this file by push-relay-deploy; the keys
 # live in /etc/ruchoir-push-relay, never in the repository.
