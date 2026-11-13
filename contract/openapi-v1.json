@@ -491,7 +491,7 @@
             ]
           },
           "category": {
-            "description": "One of `mention`, `reply`, `direct`, `activity`, `reminder`, `invitation`, `notice`.",
+            "description": "One of `mention`, `reply`, `direct`, `activity`, `reminder`, `invitation`, `share`, `notice`.",
             "type": "string"
           },
           "kind": {

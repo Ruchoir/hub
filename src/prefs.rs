@@ -11,7 +11,7 @@
 //! - **do not disturb**, the presence they chose.
 //!
 //! A level decides how much an organisation says: `mentions` keeps what names or addresses the person
-//! (`mention`, `direct`), `none` silences its conversations. A reminder, an invitation or a notice is
+//! (`mention`, `direct`), `none` silences its conversations. A reminder, an invitation, a share or a notice is
 //! asked for or addressed to the person and passes any level.
 //!
 //! Quiet hours and do not disturb decide *when*, not *whether*: what cannot interrupt now is in the
@@ -56,7 +56,8 @@ impl Categories {
             "direct" => self.direct,
             "activity" => self.activity,
             "reminder" => self.reminder,
-            "invitation" => self.invitation,
+            // Something shared with the person is told as an invitation is: one setting for both.
+            "invitation" | "share" => self.invitation,
             "notice" => self.notice,
             _ => false,
         }
@@ -200,7 +201,7 @@ pub fn allows(
         return false;
     }
     // Asked for or addressed to the person: no organisation's level holds it back.
-    if matches!(category, "reminder" | "invitation" | "notice") {
+    if matches!(category, "reminder" | "invitation" | "share" | "notice") {
         return true;
     }
     match level.unwrap_or("all") {
