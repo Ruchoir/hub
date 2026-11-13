@@ -45,6 +45,7 @@ pub const CATEGORIES: &[&str] = &[
     "activity",
     "reminder",
     "invitation",
+    "share",
     "notice",
 ];
 
@@ -59,7 +60,7 @@ fn internal(error: DbErr) -> Problem {
 pub struct Publication {
     /// `<product>.<name>`, the product being the publisher (`chat.mention`).
     pub kind: String,
-    /// One of `mention`, `reply`, `direct`, `activity`, `reminder`, `invitation`, `notice`.
+    /// One of `mention`, `reply`, `direct`, `activity`, `reminder`, `invitation`, `share`, `notice`.
     pub category: String,
     /// The organisation it happened in, if any.
     pub organisation: Option<Uuid>,

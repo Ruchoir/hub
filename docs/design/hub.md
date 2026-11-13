@@ -69,7 +69,7 @@ when it publishes:
 
 - `kind`, namespaced by product (`chat.mention`, `calendar.reminder`);
 - `category`, one of a few the hub knows (`mention`, `reply`, `direct`, `activity`, `reminder`,
-  `invitation`, `notice`), which decides urgency, preferences and mail;
+  `invitation`, `share`, `notice`), which decides urgency, preferences and mail;
 - `organisation`, `actor`, `object` (an opaque id), `link` (where the entry leads);
 - `variables`: the names and the excerpt the entry shows (`{"place": "#général", "excerpt": "..."}`),
   as they stood when it was published, and `title` and `body`, the two lines the desktop and mobile

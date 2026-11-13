@@ -7,7 +7,7 @@
 //!
 //! - `actor_name`: who did it, as their name reads (`Camille`);
 //! - `place`: where, as the product names it (`#général · Acme`);
-//! - `subject`: what it is about (an event's title);
+//! - `subject`: what it is about (an event's title, a shared file's name);
 //! - `excerpt`: the first words of it, as written, never translated.
 //!
 //! Each is optional; a missing name reads "someone", a missing place "Ruchoir".
@@ -143,6 +143,26 @@ fn label(locale: Locale, category: &str) -> &'static str {
     }
 }
 
+/// Something shared with the person, its name quoted as each language quotes: "Camille a partagé
+/// « Budget » avec vous". Without its name: "Camille a partagé quelque chose avec vous".
+fn shared(locale: Locale, actor: &str, subject: Option<&str>) -> String {
+    match (locale, subject) {
+        // French typography: a non-breaking space inside the guillemets.
+        (Locale::Fr, Some(s)) => format!("{actor} a partagé «\u{a0}{s}\u{a0}» avec vous"),
+        (Locale::Fr, None) => format!("{actor} a partagé quelque chose avec vous"),
+        (Locale::En, Some(s)) => format!("{actor} shared \u{201c}{s}\u{201d} with you"),
+        (Locale::En, None) => format!("{actor} shared something with you"),
+        (Locale::Es, Some(s)) => format!("{actor} ha compartido «{s}» contigo"),
+        (Locale::Es, None) => format!("{actor} ha compartido algo contigo"),
+        (Locale::De, Some(s)) => format!("{actor} hat \u{201e}{s}\u{201c} mit Ihnen geteilt"),
+        (Locale::De, None) => format!("{actor} hat etwas mit Ihnen geteilt"),
+        (Locale::It, Some(s)) => format!("{actor} ha condiviso «{s}» con te"),
+        (Locale::It, None) => format!("{actor} ha condiviso qualcosa con te"),
+        (Locale::Pl, Some(s)) => format!("{actor} udostępnił Ci \u{201e}{s}\u{201d}"),
+        (Locale::Pl, None) => format!("{actor} udostępnił Ci coś"),
+    }
+}
+
 /// What happened, in one line: "Camille vous a mentionné", "Rappel : Répétition".
 pub fn headline(locale: Locale, category: &str, variables: &Map<String, Value>) -> String {
     if matches!(category, "reminder" | "notice") {
@@ -155,6 +175,9 @@ pub fn headline(locale: Locale, category: &str, variables: &Map<String, Value>) 
         };
     }
     let actor = text(variables, "actor_name").unwrap_or_else(|| someone(locale));
+    if category == "share" {
+        return shared(locale, actor, text(variables, "subject"));
+    }
     format!("{actor} {}", verb(locale, category))
 }
 
@@ -263,6 +286,31 @@ mod tests {
         // An invitation says what it is to; a mention does not repeat its subject.
         assert_eq!(detail("invitation", &v).as_deref(), Some("Répétition"));
         assert_eq!(detail("mention", &v), None);
+    }
+
+    #[test]
+    fn a_share_names_who_and_what() {
+        let v = vars(json!({ "actor_name": "Camille", "subject": "Budget", "place": "Acme" }));
+        assert_eq!(
+            digest_line(Locale::Fr, "share", &v),
+            (
+                "Camille a partagé «\u{a0}Budget\u{a0}» avec vous · Acme".to_owned(),
+                String::new()
+            )
+        );
+        assert_eq!(
+            headline(Locale::En, "share", &v),
+            "Camille shared \u{201c}Budget\u{201d} with you"
+        );
+        let v = vars(json!({ "subject": "Budget" }));
+        assert_eq!(
+            headline(Locale::Fr, "share", &v),
+            "Quelqu'un a partagé «\u{a0}Budget\u{a0}» avec vous"
+        );
+        assert_eq!(
+            headline(Locale::De, "share", &Map::new()),
+            "Jemand hat etwas mit Ihnen geteilt"
+        );
     }
 
     #[test]
