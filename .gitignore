@@ -7,6 +7,9 @@
 .env.*
 !.env.example
 
+# A developer's own changes to compose.yaml (ports already taken on their machine).
+compose.override.yaml
+
 # Dependencies and build output.
 node_modules/
 target/

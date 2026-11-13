@@ -69,6 +69,19 @@ skipped without them (except with `RUCHOIR_TEST_STORES=required`, as in the CI).
 throwaway stores only, such as those of `compose.yaml`. The tests never call out: they empty
 `HUB_PUSH_RELAY_URL`.
 
+`compose.yaml` publishes PostgreSQL on `127.0.0.1:5432` and Valkey on `127.0.0.1:6379`. If a store
+of your own already holds one of these ports, `docker compose up` fails on it: move the port in a
+`compose.override.yaml` (ignored by git) and point the URL at it.
+
+```yaml
+services:
+  postgres:
+    ports: !override
+      - "127.0.0.1:55432:5432"
+```
+
+Then `RUCHOIR_TEST_DATABASE_URL=postgres://hub:hub@localhost:55432/hub`.
+
 ## Contract
 
 The contract of `/api/v1` is derived from the code and recorded in `contract/openapi-v1.json`; the
